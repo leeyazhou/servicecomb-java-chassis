@@ -1,7 +1,36 @@
 # Java Chassis  
-[![Build Status](https://travis-ci.org/apache/servicecomb-java-chassis.svg?branch=master)](https://travis-ci.org/apache/servicecomb-java-chassis?branch=master) [![Coverage Status](https://coveralls.io/repos/github/apache/servicecomb-java-chassis/badge.svg?branch=master)](https://coveralls.io/github/apache/servicecomb-java-chassis?branch=master) [![Maven Central](https://maven-badges.herokuapp.com/maven-central/org.apache.servicecomb/java-chassis-core/badge.svg)](http://search.maven.org/#search%7Cga%7C1%7Corg.apache.servicecomb) [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html) [![Gitter](https://img.shields.io/badge/ServiceComb-Gitter-ff69b4.svg)](https://gitter.im/ServiceCombUsers/Lobby)  
+[中文](README_ZH.md)[![Build Status](https://travis-ci.org/apache/servicecomb-java-chassis.svg?branch=master)](https://travis-ci.org/apache/servicecomb-java-chassis?branch=master) [![Coverage Status](https://coveralls.io/repos/github/apache/servicecomb-java-chassis/badge.svg?branch=master)](https://coveralls.io/github/apache/servicecomb-java-chassis?branch=master) [![Maven Central](https://maven-badges.herokuapp.com/maven-central/org.apache.servicecomb/java-chassis-core/badge.svg)](http://search.maven.org/#search%7Cga%7C1%7Corg.apache.servicecomb) [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html) [![Gitter](https://img.shields.io/badge/ServiceComb-Gitter-ff69b4.svg)](https://gitter.im/ServiceCombUsers/Lobby)  
 
 Apache ServiceComb Java Chassis is a Software Development Kit (SDK) for rapid development of microservices in Java, providing service registration, service discovery, dynamic routing, and service management features
+
+# Why use Java Chassis
+
+- **High performance**
+
+  The transport capability of Java Chassis is based on [Vert.x](https://vertx.io), which enables Java Chassis to process
+  massive requests with relatively less hardware resources, and support [reactive develop style](https://www.reactivemanifesto.org).
+
+- **Native support for OpenAPI**
+
+  Java Chassis describes the APIs of the microservices via [Swagger](https://swagger.io) natively, to help
+  developers to design microservices that comply to [OpenAPI standard](https://swagger.io/specification/v2/).
+
+- **Flexible develop style**
+
+  Currently Java Chassis allow developers to develop their microservice APIs in `SpringMVC`/`JAX-RS`/`transparent RPC` styles,
+  and to send the request in `RPC`/`RestTemplate` styles. And there are three kind of build-in transport mode:
+  `Rest over Vertx`/`Rest over Servlet`/`Highway`. All of these features can be combined and replaced easily,
+  because they are decoupled and all based on the Swagger schema, which can provide high flexibility.
+
+- **Out-of-box microservice governance features**
+
+  Java Chassis provides a lot of features for microservice governance and monitor.
+
+- **Multi languages support**
+
+  Via [ServiceComb Mesher](https://github.com/apache/servicecomb-mesher), the microservices
+  built by other languages are also able to work with ServiceComb components. And Java Chassis can communicate with such
+  microservices and make use of the built-in capabilities.
 
 ## Quick Start
 

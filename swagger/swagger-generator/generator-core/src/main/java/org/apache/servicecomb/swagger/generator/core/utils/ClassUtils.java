@@ -52,7 +52,7 @@ public final class ClassUtils {
       List<BodyParameter> bodyParameters) {
     SwaggerGenerator swaggerGenerator = operationGenerator.getSwaggerGenerator();
     Method method = operationGenerator.getProviderMethod();
-    String clsName = swaggerGenerator.ensureGetPackageName() + "." + method.getName() + "Body";
+    String clsName = swaggerGenerator.ensureGetPackageName() + "." + ParamUtils.generateBodyParameterName(method);
     Class<?> cls = getClassByName(swaggerGenerator.getClassLoader(), clsName);
     if (cls != null) {
       return cls;

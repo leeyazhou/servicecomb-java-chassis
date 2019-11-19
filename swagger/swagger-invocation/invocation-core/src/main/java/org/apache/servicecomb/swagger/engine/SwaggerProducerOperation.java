@@ -34,8 +34,12 @@ import org.apache.servicecomb.swagger.invocation.exception.ExceptionFactory;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
 import org.apache.servicecomb.swagger.invocation.extension.ProducerInvokeExtension;
 import org.apache.servicecomb.swagger.invocation.response.producer.ProducerResponseMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SwaggerProducerOperation {
+  private static final Logger LOGGER = LoggerFactory.getLogger(SwaggerProducerOperation.class);
+
   private String name;
 
   // 因为存在aop场景，所以，producerClass不一定等于producerInstance.getClass()
@@ -148,12 +152,16 @@ public class SwaggerProducerOperation {
         asyncResp.handle(processException(invocation, ex));
       });
     } catch (IllegalArgumentException ae) {
+      LOGGER.error("Parameters not valid or types not match {},",
+          invocation.getInvocationQualifiedName(), ae);
       invocation.onBusinessMethodFinish();
       invocation.onBusinessFinish();
       asyncResp.handle(processException(invocation,
           new InvocationException(Status.BAD_REQUEST.getStatusCode(), "",
               new CommonExceptionData("Parameters not valid or types not match."), ae)));
     } catch (Throwable e) {
+      LOGGER.error("unexpected error {},",
+          invocation.getInvocationQualifiedName(), e);
       invocation.onBusinessMethodFinish();
       invocation.onBusinessFinish();
       asyncResp.handle(processException(invocation, e));
@@ -183,6 +191,8 @@ public class SwaggerProducerOperation {
       invocation.onBusinessMethodFinish();
       invocation.onBusinessFinish();
     } catch (IllegalArgumentException ae) {
+      LOGGER.error("Parameters not valid or types not match {},",
+          invocation.getInvocationQualifiedName(), ae);
       invocation.onBusinessMethodFinish();
       invocation.onBusinessFinish();
       // ae.getMessage() is always null. Give a custom error message.
@@ -190,6 +200,8 @@ public class SwaggerProducerOperation {
           new InvocationException(Status.BAD_REQUEST.getStatusCode(), "",
               new CommonExceptionData("Parameters not valid or types not match."), ae));
     } catch (Throwable e) {
+      LOGGER.error("unexpected error {},",
+          invocation.getInvocationQualifiedName(), e);
       invocation.onBusinessMethodFinish();
       invocation.onBusinessFinish();
       response = processException(invocation, e);

@@ -200,10 +200,10 @@ public class ConfigurationSpringInitializer extends PropertyPlaceholderConfigure
         try {
           configFromSpringBoot.put(propertyName, environment.getProperty(propertyName, Object.class));
         } catch (Exception e) {
-          if (!getIfIgnoreEnvironment()) {
-            throw new RuntimeException("set up spring property source failed.", e);
-          } else {
+          if (ignoreResolveFailure()) {
             LOGGER.warn("set up spring property source failed.", e);
+          } else {
+            throw new RuntimeException("set up spring property source failed.If you still want to start up the application and ignore errors, you can set servicecomb.config.ignoreResolveFailure to true.", e);
           }
         }
       }
@@ -213,7 +213,9 @@ public class ConfigurationSpringInitializer extends PropertyPlaceholderConfigure
     LOGGER.debug("a none EnumerablePropertySource is ignored, propertySourceName = [{}]", propertySource.getName());
   }
 
-  private boolean getIfIgnoreEnvironment() {
-    return (Boolean) ConfigUtil.createLocalConfig().getProperty("servicecomb.config.ignoreResolveFailure");
+  private boolean ignoreResolveFailure() {
+    return ConfigUtil
+            .createLocalConfig()
+            .getBoolean("servicecomb.config.ignoreResolveFailure", false);
   }
 }
