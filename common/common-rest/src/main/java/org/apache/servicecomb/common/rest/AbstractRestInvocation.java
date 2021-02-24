@@ -21,12 +21,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response.Status;
-import javax.xml.ws.Holder;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.servicecomb.common.rest.codec.produce.ProduceProcessor;
@@ -34,6 +32,7 @@ import org.apache.servicecomb.common.rest.codec.produce.ProduceProcessorManager;
 import org.apache.servicecomb.common.rest.definition.RestOperationMeta;
 import org.apache.servicecomb.common.rest.filter.HttpServerFilter;
 import org.apache.servicecomb.common.rest.filter.HttpServerFilterBeforeSendResponseExecutor;
+import org.apache.servicecomb.common.rest.filter.inner.RestServerCodecFilter;
 import org.apache.servicecomb.common.rest.locator.OperationLocator;
 import org.apache.servicecomb.common.rest.locator.ServicePathManager;
 import org.apache.servicecomb.core.Const;
@@ -41,6 +40,7 @@ import org.apache.servicecomb.core.Handler;
 import org.apache.servicecomb.core.Invocation;
 import org.apache.servicecomb.core.definition.MicroserviceMeta;
 import org.apache.servicecomb.core.definition.OperationMeta;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.common.utils.JsonUtils;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletRequestEx;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletResponseEx;
@@ -79,7 +79,7 @@ public abstract class AbstractRestInvocation {
   protected void findRestOperation(MicroserviceMeta microserviceMeta) {
     ServicePathManager servicePathManager = ServicePathManager.getServicePathManager(microserviceMeta);
     if (servicePathManager == null) {
-      LOGGER.error("No schema defined for {}:{}.", microserviceMeta.getAppId(), microserviceMeta.getName());
+      LOGGER.error("No schema defined for {}:{}.", microserviceMeta.getAppId(), microserviceMeta.getMicroserviceName());
       throw new InvocationException(Status.NOT_FOUND, Status.NOT_FOUND.getReasonPhrase());
     }
 
@@ -91,6 +91,8 @@ public abstract class AbstractRestInvocation {
   protected void initProduceProcessor() {
     produceProcessor = restOperationMeta.ensureFindProduceProcessor(requestEx);
     if (produceProcessor == null) {
+      LOGGER.error("Accept {} is not supported, operation={}.", requestEx.getHeader(HttpHeaders.ACCEPT),
+          restOperationMeta.getOperationMeta().getMicroserviceQualifiedName());
       String msg = String.format("Accept %s is not supported", requestEx.getHeader(HttpHeaders.ACCEPT));
       throw new InvocationException(Status.NOT_ACCEPTABLE, msg);
     }
@@ -178,7 +180,7 @@ public abstract class AbstractRestInvocation {
       try {
         providerQpsFlowControlHandler.handle(invocation, response -> {
           qpsFlowControlReject.value = true;
-          produceProcessor = ProduceProcessorManager.JSON_PROCESSOR;
+          produceProcessor = ProduceProcessorManager.INSTANCE.findDefaultJsonProcessor();
           sendResponse(response);
         });
       } catch (Throwable e) {
@@ -245,7 +247,7 @@ public abstract class AbstractRestInvocation {
 
   public void sendFailResponse(Throwable throwable) {
     if (produceProcessor == null) {
-      produceProcessor = ProduceProcessorManager.DEFAULT_PROCESSOR;
+      produceProcessor = ProduceProcessorManager.INSTANCE.findDefaultProcessor();
     }
 
     Response response = Response.createProducerFail(throwable);
@@ -266,16 +268,8 @@ public abstract class AbstractRestInvocation {
 
   @SuppressWarnings("deprecation")
   protected void sendResponse(Response response) {
-    if (response.getHeaders().getHeaderMap() != null) {
-      for (Entry<String, List<Object>> entry : response.getHeaders().getHeaderMap().entrySet()) {
-        for (Object value : entry.getValue()) {
-          if (!entry.getKey().equalsIgnoreCase(HttpHeaders.CONTENT_LENGTH)
-              && !entry.getKey().equalsIgnoreCase("Transfer-Encoding")) {
-            responseEx.addHeader(entry.getKey(), String.valueOf(value));
-          }
-        }
-      }
-    }
+    RestServerCodecFilter.copyHeadersToHttpResponse(response.getHeaders(), responseEx);
+
     responseEx.setStatus(response.getStatusCode(), response.getReasonPhrase());
     responseEx.setAttribute(RestConst.INVOCATION_HANDLER_RESPONSE, response);
     responseEx.setAttribute(RestConst.INVOCATION_HANDLER_PROCESSOR, produceProcessor);

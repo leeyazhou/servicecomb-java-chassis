@@ -24,10 +24,14 @@ import javax.ws.rs.core.Response.Status.Family;
 
 import org.apache.servicecomb.common.rest.AbstractRestInvocation;
 import org.apache.servicecomb.common.rest.RestConst;
+import org.apache.servicecomb.common.rest.RestProducerInvocationFlow;
+import org.apache.servicecomb.common.rest.RestVertxProducerInvocationCreator;
 import org.apache.servicecomb.common.rest.VertxRestInvocation;
 import org.apache.servicecomb.core.Const;
-import org.apache.servicecomb.core.CseContext;
+import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
+import org.apache.servicecomb.core.definition.MicroserviceMeta;
+import org.apache.servicecomb.core.invocation.InvocationCreator;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletRequestEx;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletResponseEx;
 import org.apache.servicecomb.foundation.vertx.http.VertxServerRequestToHttpServletRequest;
@@ -46,13 +50,19 @@ import io.vertx.ext.web.RoutingContext;
 public class VertxRestDispatcher extends AbstractVertxHttpDispatcher {
   private static final Logger LOGGER = LoggerFactory.getLogger(VertxRestDispatcher.class);
 
+  private static final String KEY_ORDER = "servicecomb.http.dispatcher.rest.order";
+
   private static final String KEY_ENABLED = "servicecomb.http.dispatcher.rest.enabled";
+
+  private static final String KEY_PATTERN = "servicecomb.http.dispatcher.rest.pattern";
 
   private Transport transport;
 
+  private MicroserviceMeta microserviceMeta;
+
   @Override
   public int getOrder() {
-    return Integer.MAX_VALUE;
+    return DynamicPropertyFactory.getInstance().getIntProperty(KEY_ORDER, Integer.MAX_VALUE).get();
   }
 
   @Override
@@ -63,8 +73,14 @@ public class VertxRestDispatcher extends AbstractVertxHttpDispatcher {
   @Override
   public void init(Router router) {
     // cookies handler are enabled by default start from 3.8.3
-    router.route().handler(createBodyHandler());
-    router.route().failureHandler(this::failureHandler).handler(this::onRequest);
+    String pattern = DynamicPropertyFactory.getInstance().getStringProperty(KEY_PATTERN, null).get();
+    if (pattern == null) {
+      router.route().handler(createBodyHandler());
+      router.route().failureHandler(this::failureHandler).handler(this::onRequest);
+    } else {
+      router.routeWithRegex(pattern).handler(createBodyHandler());
+      router.routeWithRegex(pattern).failureHandler(this::failureHandler).handler(this::onRequest);
+    }
   }
 
   protected void failureHandler(RoutingContext context) {
@@ -72,9 +88,9 @@ public class VertxRestDispatcher extends AbstractVertxHttpDispatcher {
 
     AbstractRestInvocation restProducerInvocation = context.get(RestConst.REST_PRODUCER_INVOCATION);
     Throwable e = context.failure();
-    if (ErrorDataDecoderException.class.isInstance(e)) {
+    if (e instanceof ErrorDataDecoderException) {
       Throwable cause = e.getCause();
-      if (InvocationException.class.isInstance(cause)) {
+      if (cause instanceof InvocationException) {
         e = cause;
       }
     }
@@ -128,7 +144,7 @@ public class VertxRestDispatcher extends AbstractVertxHttpDispatcher {
    * Use routingContext to send failure information in throwable.
    */
   private void sendExceptionByRoutingContext(RoutingContext context, Throwable e) {
-    if (InvocationException.class.isInstance(e)) {
+    if (e instanceof InvocationException) {
       InvocationException invocationException = (InvocationException) e;
       context.response().putHeader(HttpHeaders.CONTENT_TYPE, MediaType.WILDCARD)
           .setStatusCode(invocationException.getStatusCode()).setStatusMessage(invocationException.getReasonPhrase())
@@ -183,10 +199,20 @@ public class VertxRestDispatcher extends AbstractVertxHttpDispatcher {
 
   protected void onRequest(RoutingContext context) {
     if (transport == null) {
-      transport = CseContext.getInstance().getTransportManager().findTransport(Const.RESTFUL);
+      transport = SCBEngine.getInstance().getTransportManager().findTransport(Const.RESTFUL);
+      microserviceMeta = SCBEngine.getInstance().getProducerMicroserviceMeta();
     }
     HttpServletRequestEx requestEx = new VertxServerRequestToHttpServletRequest(context);
     HttpServletResponseEx responseEx = new VertxServerResponseToHttpServletResponse(context.response());
+
+    if (SCBEngine.getInstance().isFilterChainEnabled()) {
+      InvocationCreator creator = new RestVertxProducerInvocationCreator(context,
+          microserviceMeta, transport.getEndpoint(),
+          requestEx, responseEx);
+      new RestProducerInvocationFlow(creator, requestEx, responseEx)
+          .run();
+      return;
+    }
 
     VertxRestInvocation vertxRestInvocation = new VertxRestInvocation();
     context.put(RestConst.REST_PRODUCER_INVOCATION, vertxRestInvocation);

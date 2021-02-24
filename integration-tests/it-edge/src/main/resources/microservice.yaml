@@ -50,6 +50,14 @@ servicecomb:
       org.apache.servicecomb.it.schema.RestControllerSchema:
         restControllerSchemaQueries:
           transport: rest
+      paramCodecRestOnly:
+        transport: rest
+      springMVCObjectRestSchemaRestOnly:
+        transport: rest
+      edgePublicHeadersJaxrsSchema:
+        transport: rest
+      edgePublicHeadersSpringMVCSchema:
+        transport: rest
     it-producer-h2:
       generic:
         genericUser:
@@ -67,6 +75,14 @@ servicecomb:
       org.apache.servicecomb.it.schema.RestControllerSchema:
         restControllerSchemaQueries:
           transport: rest
+      paramCodecRestOnly:
+        transport: rest
+      springMVCObjectRestSchemaRestOnly:
+        transport: rest
+      edgePublicHeadersJaxrsSchema:
+        transport: rest
+      edgePublicHeadersSpringMVCSchema:
+        transport: rest
     it-producer-h2c:
       generic:
         genericUser:
@@ -84,6 +100,14 @@ servicecomb:
       org.apache.servicecomb.it.schema.RestControllerSchema:
         restControllerSchemaQueries:
           transport: rest
+      paramCodecRestOnly:
+        transport: rest
+      springMVCObjectRestSchemaRestOnly:
+        transport: rest
+      edgePublicHeadersJaxrsSchema:
+        transport: rest
+      edgePublicHeadersSpringMVCSchema:
+        transport: rest
     it-producer-deploy-springboot2-servlet:
       generic:
         genericUser:
@@ -101,6 +125,14 @@ servicecomb:
       org.apache.servicecomb.it.schema.RestControllerSchema:
         restControllerSchemaQueries:
           transport: rest
+      paramCodecRestOnly:
+        transport: rest
+      springMVCObjectRestSchemaRestOnly:
+        transport: rest
+      edgePublicHeadersJaxrsSchema:
+        transport: rest
+      edgePublicHeadersSpringMVCSchema:
+        transport: rest
     it-producer-deploy-springboot2-standalone:
       generic:
         genericUser:
@@ -118,6 +150,19 @@ servicecomb:
       org.apache.servicecomb.it.schema.RestControllerSchema:
         restControllerSchemaQueries:
           transport: rest
+      paramCodecRestOnly:
+        transport: rest
+      springMVCObjectRestSchemaRestOnly:
+        transport: rest
+      edgePublicHeadersJaxrsSchema:
+        transport: rest
+      edgePublicHeadersSpringMVCSchema:
+        transport: rest
+  edge:
+    filter:
+      addHeader:
+        enabled: true
+        allowedHeaders: external_1,external_2
   http:
     dispatcher:
       edge:
@@ -140,6 +185,7 @@ servicecomb:
               microserviceName: business
               versionRule: 2.0.0-3.0.0
   request:
+    timeout: 5000
     it-producer:
       edgeExceptionConvertSchema:
         timeout: 30000

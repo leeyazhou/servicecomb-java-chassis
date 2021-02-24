@@ -16,8 +16,6 @@
  */
 package org.apache.servicecomb.inspector.internal;
 
-import static org.apache.servicecomb.serviceregistry.api.Const.URL_PREFIX;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -55,11 +53,13 @@ import org.apache.servicecomb.core.Const;
 import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
 import org.apache.servicecomb.foundation.common.part.InputStreamPart;
+import org.apache.servicecomb.foundation.common.utils.ClassLoaderScopeContext;
 import org.apache.servicecomb.inspector.internal.model.DynamicPropertyView;
 import org.apache.servicecomb.inspector.internal.model.PriorityPropertyView;
 import org.apache.servicecomb.inspector.internal.swagger.AppendStyleProcessor;
 import org.apache.servicecomb.inspector.internal.swagger.SchemaFormat;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
+import org.apache.servicecomb.registry.RegistrationManager;
+import org.apache.servicecomb.registry.definition.DefinitionConst;
 import org.apache.servicecomb.swagger.SwaggerUtils;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
@@ -130,7 +130,7 @@ public class InspectorImpl {
       return;
     }
 
-    String urlPrefix = System.getProperty(URL_PREFIX);
+    String urlPrefix = ClassLoaderScopeContext.getClassLoaderScopeProperty(DefinitionConst.URL_PREFIX);
     if (StringUtils.isEmpty(urlPrefix)) {
       return;
     }
@@ -186,7 +186,8 @@ public class InspectorImpl {
     }
 
     Part part = new InputStreamPart(null, new ByteArrayInputStream(os.toByteArray()))
-        .setSubmittedFileName(RegistryUtils.getMicroservice().getServiceName() + format.getSuffix() + ".zip");
+        .setSubmittedFileName(
+            RegistrationManager.INSTANCE.getMicroservice().getServiceName() + format.getSuffix() + ".zip");
     return Response.ok(part);
   }
 
@@ -217,9 +218,9 @@ public class InspectorImpl {
 
     Response response = Response.ok(part);
     if (!download) {
-      response.getHeaders().addHeader(HttpHeaders.CONTENT_DISPOSITION, "inline");
+      response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "inline");
     }
-    response.getHeaders().addHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_HTML);
+    response.setHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_HTML);
     return response;
   }
 
@@ -313,7 +314,8 @@ public class InspectorImpl {
     priorityPropertyManager.getConfigObjectMap().values().stream()
         .flatMap(Collection::stream)
         .forEach(p -> views.add(createPriorityPropertyView(p)));
-    priorityPropertyManager.getPriorityPropertyMap().values().forEach(p -> views.add(createPriorityPropertyView(p)));
+    priorityPropertyManager.getPriorityPropertySet().forEach(p ->
+        views.add(createPriorityPropertyView(p)));
     return views;
   }
 

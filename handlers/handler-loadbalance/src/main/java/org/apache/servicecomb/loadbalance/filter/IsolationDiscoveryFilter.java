@@ -28,10 +28,10 @@ import org.apache.servicecomb.loadbalance.ServiceCombLoadBalancerStats;
 import org.apache.servicecomb.loadbalance.ServiceCombServer;
 import org.apache.servicecomb.loadbalance.ServiceCombServerStats;
 import org.apache.servicecomb.loadbalance.event.IsolationServerEvent;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstance;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryContext;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryFilter;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryTreeNode;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstance;
+import org.apache.servicecomb.registry.discovery.DiscoveryContext;
+import org.apache.servicecomb.registry.discovery.DiscoveryFilter;
+import org.apache.servicecomb.registry.discovery.DiscoveryTreeNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -144,15 +144,10 @@ public class IsolationDiscoveryFilter implements DiscoveryFilter {
     if (!checkThresholdAllowed(settings, serverStats)) {
       if (serverStats.isIsolated()
           && (System.currentTimeMillis() - serverStats.getLastVisitTime()) > settings.singleTestTime) {
-        if (!ServiceCombServerStats.applyForTryingChance()) {
-          // this server hasn't been isolated for enough long time, or there is no trying chance
-          return false;
-        }
-        // [1]we can implement better recovery based on several attempts, but here we do not know if this attempt is success
-        invocation.addLocalContext(TRYING_INSTANCES_EXISTING, Boolean.TRUE);
-        return true;
+        return ServiceCombServerStats.applyForTryingChance(invocation);
       }
       if (!serverStats.isIsolated()) {
+        // checkThresholdAllowed is not concurrent control, may print several logs/events in current access.
         serverStats.markIsolated(true);
         eventBus.post(
             new IsolationServerEvent(invocation, instance, serverStats,
@@ -165,7 +160,7 @@ public class IsolationDiscoveryFilter implements DiscoveryFilter {
     if (serverStats.isIsolated()) {
       // [2] so that we add a feature to isolate for at least a minimal time, and we can avoid
       // high volume of concurrent requests with a percentage of error(e.g. 50%) scenario with no isolation
-      if ((System.currentTimeMillis() - serverStats.getLastVisitTime()) <= settings.minIsolationTime) {
+      if ((System.currentTimeMillis() - serverStats.getIsolatedTime()) <= settings.minIsolationTime) {
         return false;
       }
       serverStats.markIsolated(false);
@@ -184,7 +179,7 @@ public class IsolationDiscoveryFilter implements DiscoveryFilter {
 
     if (settings.continuousFailureThreshold > 0) {
       // continuousFailureThreshold has higher priority to decide the result
-      if (serverStats.getCountinuousFailureCount() >= settings.continuousFailureThreshold) {
+      if (serverStats.getContinuousFailureCount() >= settings.continuousFailureThreshold) {
         return false;
       }
     }

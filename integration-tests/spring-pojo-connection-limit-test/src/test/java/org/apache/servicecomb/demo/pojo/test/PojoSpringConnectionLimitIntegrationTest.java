@@ -17,7 +17,6 @@
 
 package org.apache.servicecomb.demo.pojo.test;
 
-import static org.apache.servicecomb.serviceregistry.client.LocalServiceRegistryClientImpl.LOCAL_REGISTRY_FILE_KEY;
 import static org.junit.Assert.fail;
 
 import org.junit.Assert;
@@ -30,7 +29,6 @@ import org.springframework.test.context.junit4.SpringRunner;
 public class PojoSpringConnectionLimitIntegrationTest {
   @BeforeClass
   public static void setUpClass() throws Exception {
-    System.setProperty(LOCAL_REGISTRY_FILE_KEY, "notExistJustForceLocal");
     PojoTestMain.main(null);
   }
 
@@ -40,7 +38,7 @@ public class PojoSpringConnectionLimitIntegrationTest {
       PojoService.hello.SayHello("whatever");
       fail("connection limit failed");
     } catch (Exception e) {
-      Assert.assertEquals("java.io.IOException: socket closed", e.getCause().toString());
+      Assert.assertEquals("io.vertx.core.VertxException: Connection was closed", e.getCause().toString());
     }
   }
 }

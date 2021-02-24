@@ -27,10 +27,11 @@ import org.apache.servicecomb.loadbalance.Configuration;
 import org.apache.servicecomb.loadbalance.ServiceCombLoadBalancerStats;
 import org.apache.servicecomb.loadbalance.ServiceCombServer;
 import org.apache.servicecomb.loadbalance.ServiceCombServerStats;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstance;
-import org.apache.servicecomb.serviceregistry.cache.CacheEndpoint;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryContext;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryTreeNode;
+import org.apache.servicecomb.loadbalance.TestServiceCombServerStats;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstance;
+import org.apache.servicecomb.registry.cache.CacheEndpoint;
+import org.apache.servicecomb.registry.discovery.DiscoveryContext;
+import org.apache.servicecomb.registry.discovery.DiscoveryTreeNode;
 import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
@@ -74,19 +75,20 @@ public class IsolationDiscoveryFilterTest {
       String endpoint = "rest://127.0.0.1:" + i;
       instance.setEndpoints(Collections.singletonList(endpoint));
       data.put(instance.getInstanceId(), instance);
-      ServiceCombServer serviceCombServer = new ServiceCombServer(transport, new CacheEndpoint(endpoint, instance));
+      ServiceCombServer serviceCombServer = new ServiceCombServer(invocation.getMicroserviceName(), transport,
+          new CacheEndpoint(endpoint, instance));
       ServiceCombLoadBalancerStats.INSTANCE.getServiceCombServerStats(serviceCombServer);
     }
     discoveryTreeNode.data(data);
 
     filter = new IsolationDiscoveryFilter();
-    ServiceCombServerStats.releaseTryingChance();
+    TestServiceCombServerStats.releaseTryingChance();
   }
 
   @After
   public void after() {
     Deencapsulation.invoke(ServiceCombLoadBalancerStats.INSTANCE, "init");
-    ServiceCombServerStats.releaseTryingChance();
+    TestServiceCombServerStats.releaseTryingChance();
   }
 
   @Test
@@ -137,8 +139,7 @@ public class IsolationDiscoveryFilterTest {
     ServiceCombLoadBalancerStats.INSTANCE.markIsolated(server0, true);
 
     Assert.assertTrue(ServiceCombServerStats.isolatedServerCanTry());
-    Assert.assertFalse(
-        Boolean.TRUE.equals(invocation.getLocalContext(IsolationDiscoveryFilter.TRYING_INSTANCES_EXISTING)));
+    Assert.assertNull(TestServiceCombServerStats.getTryingIsolatedServerInvocation());
     DiscoveryTreeNode childNode = filter.discovery(discoveryContext, discoveryTreeNode);
     Map<String, MicroserviceInstance> childNodeData = childNode.data();
     Assert.assertThat(childNodeData.keySet(), Matchers.containsInAnyOrder("i0", "i1", "i2"));
@@ -147,8 +148,7 @@ public class IsolationDiscoveryFilterTest {
     Assert.assertEquals(data.get("i2"), childNodeData.get("i2"));
     Assert.assertTrue(serviceCombServerStats.isIsolated());
     Assert.assertFalse(ServiceCombServerStats.isolatedServerCanTry());
-    Assert.assertTrue(
-        Boolean.TRUE.equals(invocation.getLocalContext(IsolationDiscoveryFilter.TRYING_INSTANCES_EXISTING)));
+    Assert.assertSame(invocation, TestServiceCombServerStats.getTryingIsolatedServerInvocation());
   }
 
   @Test
@@ -180,7 +180,8 @@ public class IsolationDiscoveryFilterTest {
     Assert.assertEquals(data.get("i1"), childNodeData.get("i1"));
     Assert.assertEquals(data.get("i2"), childNodeData.get("i2"));
 
-    ServiceCombServerStats.releaseTryingChance(); // after the first invocation releases the trying chance
+    ServiceCombServerStats
+        .checkAndReleaseTryingChance(invocation); // after the first invocation releases the trying chance
 
     // Other invocation can get the trying chance
     childNode = filter.discovery(discoveryContext, discoveryTreeNode);
@@ -214,7 +215,7 @@ public class IsolationDiscoveryFilterTest {
 
     ServiceCombServerStats serviceCombServerStats = ServiceCombLoadBalancerStats.INSTANCE
         .getServiceCombServerStats(server0);
-    Deencapsulation.setField(serviceCombServerStats, "lastVisitTime",
+    Deencapsulation.setField(serviceCombServerStats, "isolatedTime",
         System.currentTimeMillis() - Configuration.INSTANCE.getMinIsolationTime(invocation.getMicroserviceName()) - 1);
     childNode = filter.discovery(discoveryContext, discoveryTreeNode);
     childNodeData = childNode.data();
@@ -230,10 +231,11 @@ public class IsolationDiscoveryFilterTest {
     ServiceCombLoadBalancerStats.INSTANCE.markSuccess(server0);
     ServiceCombServerStats serviceCombServerStats = ServiceCombLoadBalancerStats.INSTANCE
         .getServiceCombServerStats(server0);
-    Deencapsulation.setField(serviceCombServerStats, "lastVisitTime",
-        System.currentTimeMillis() - Configuration.INSTANCE.getMinIsolationTime(invocation.getMicroserviceName()) - 1);
 
     ServiceCombLoadBalancerStats.INSTANCE.markIsolated(server0, true);
+    Deencapsulation.setField(serviceCombServerStats, "isolatedTime",
+        System.currentTimeMillis() - Configuration.INSTANCE.getMinIsolationTime(invocation.getMicroserviceName()) - 1);
+
     DiscoveryTreeNode childNode = filter.discovery(discoveryContext, discoveryTreeNode);
     Map<String, MicroserviceInstance> childNodeData = childNode.data();
     Assert.assertThat(childNodeData.keySet(), Matchers.containsInAnyOrder("i0", "i1", "i2"));

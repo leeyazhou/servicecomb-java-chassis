@@ -17,9 +17,12 @@
 
 package org.apache.servicecomb.loadbalance;
 
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.time.Clock;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.servicecomb.core.Invocation;
+import org.apache.servicecomb.foundation.common.utils.TimeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,34 +36,63 @@ public class ServiceCombServerStats {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ServiceCombServerStats.class);
 
-  /**
-   * There is not more than 1 server allowed to stay in TRYING status concurrently.
-   * If the value of globalAllowIsolatedServerTryingFlag is false, there have been 1 server in
-   * TRYING status, so the other isolated servers cannot be transferred into
-   * TRYING status; otherwise the value of globalAllowIsolatedServerTryingFlag is true.
-   */
-  private static AtomicBoolean globalAllowIsolatedServerTryingFlag = new AtomicBoolean(true);
-
-  private long lastWindow = System.currentTimeMillis();
-
   private final Object lock = new Object();
 
-  private AtomicLong continuousFailureCount = new AtomicLong(0);
+  /**
+   * There is not more than 1 server allowed to stay in TRYING status concurrently.
+   * This flag is designed to ensure such mechanism. And it makes the ServiceCombServerStats stateful.
+   * Therefore, the flag should be reset correctly after the trying server gets handled.
+   */
+  static AtomicReference<TryingIsolatedServerMarker> globalAllowIsolatedServerTryingFlag = new AtomicReference<>();
 
-  private long lastVisitTime = System.currentTimeMillis();
+  Clock clock;
 
-  private long lastActiveTime = System.currentTimeMillis();
+  private long lastWindow;
 
-  private AtomicLong totalRequests = new AtomicLong(0L);
+  private AtomicLong continuousFailureCount;
 
-  private AtomicLong successRequests = new AtomicLong(0L);
+  private long lastVisitTime;
 
-  private AtomicLong failedRequests = new AtomicLong(0L);
+  private long lastActiveTime;
+
+  private long isolatedTime;
+
+  private AtomicLong totalRequests;
+
+  private AtomicLong successRequests;
+
+  private AtomicLong failedRequests;
 
   private boolean isolated = false;
 
+  private String microserviceName;
+
+  public ServiceCombServerStats(String microserviceName) {
+    this(microserviceName, TimeUtils.getSystemDefaultZoneClock());
+  }
+
+  public ServiceCombServerStats(String microserviceName, Clock clock) {
+    this.clock = clock;
+    this.microserviceName = microserviceName;
+    init();
+  }
+
+  private void init() {
+    lastWindow = clock.millis();
+    continuousFailureCount = new AtomicLong(0);
+    lastVisitTime = clock.millis();
+    lastActiveTime = clock.millis();
+    totalRequests = new AtomicLong(0L);
+    successRequests = new AtomicLong(0L);
+    failedRequests = new AtomicLong(0L);
+  }
+
   public static boolean isolatedServerCanTry() {
-    return globalAllowIsolatedServerTryingFlag.get();
+    TryingIsolatedServerMarker marker = globalAllowIsolatedServerTryingFlag.get();
+    if (marker == null) {
+      return true;
+    }
+    return marker.isOutdated();
   }
 
   /**
@@ -68,33 +100,54 @@ public class ServiceCombServerStats {
    *
    * @return true if the chance is applied successfully, otherwise false
    */
-  public static boolean applyForTryingChance() {
-    return isolatedServerCanTry() && globalAllowIsolatedServerTryingFlag.compareAndSet(true, false);
+  public static boolean applyForTryingChance(Invocation invocation) {
+    TryingIsolatedServerMarker marker = globalAllowIsolatedServerTryingFlag.get();
+    if (marker == null) {
+      return globalAllowIsolatedServerTryingFlag.compareAndSet(null, new TryingIsolatedServerMarker(invocation));
+    }
+    if (marker.isOutdated()) {
+      return globalAllowIsolatedServerTryingFlag.compareAndSet(marker, new TryingIsolatedServerMarker(invocation));
+    }
+    return false;
   }
 
-  public static void releaseTryingChance() {
-    globalAllowIsolatedServerTryingFlag.set(true);
+  public static void checkAndReleaseTryingChance(Invocation invocation) {
+    TryingIsolatedServerMarker marker = globalAllowIsolatedServerTryingFlag.get();
+    if (marker == null || marker.getInvocation() != invocation) {
+      return;
+    }
+    globalAllowIsolatedServerTryingFlag.compareAndSet(marker, null);
   }
 
   public void markIsolated(boolean isolated) {
     this.isolated = isolated;
+    this.isolatedTime = System.currentTimeMillis();
   }
 
   public void markSuccess() {
-    long time = System.currentTimeMillis();
+    long time = clock.millis();
     ensureWindow(time);
-    lastVisitTime = time;
-    lastActiveTime = time;
+
+    if (isolated) {
+      if (Configuration.INSTANCE.isRecoverImmediatelyWhenSuccess(microserviceName)
+          && time - this.isolatedTime > Configuration.INSTANCE
+          .getMinIsolationTime(microserviceName)) {
+        resetStats();
+        LOGGER.info("trying server invocation success, and reset stats.");
+      } else {
+        LOGGER.info("trying server invocation success!");
+      }
+    }
+
     totalRequests.incrementAndGet();
     successRequests.incrementAndGet();
     continuousFailureCount.set(0);
-    if (isolated) {
-      LOGGER.info("trying server invocation success!");
-    }
+    lastVisitTime = time;
+    lastActiveTime = time;
   }
 
   public void markFailure() {
-    long time = System.currentTimeMillis();
+    long time = clock.millis();
     ensureWindow(time);
     lastVisitTime = time;
 
@@ -111,10 +164,7 @@ public class ServiceCombServerStats {
       synchronized (lock) {
         if (time - lastWindow > TIME_WINDOW_IN_MILLISECONDS) {
           if (!isolated) {
-            continuousFailureCount.set(0);
-            totalRequests.set(0);
-            successRequests.set(0);
-            failedRequests.set(0);
+            resetStats();
           }
           lastWindow = time;
         }
@@ -122,15 +172,26 @@ public class ServiceCombServerStats {
     }
   }
 
+  private void resetStats() {
+    continuousFailureCount.set(0);
+    totalRequests.set(0);
+    successRequests.set(0);
+    failedRequests.set(0);
+  }
+
   public long getLastVisitTime() {
     return lastVisitTime;
+  }
+
+  public long getIsolatedTime() {
+    return isolatedTime;
   }
 
   public long getLastActiveTime() {
     return lastActiveTime;
   }
 
-  public long getCountinuousFailureCount() {
+  public long getContinuousFailureCount() {
     return continuousFailureCount.get();
   }
 

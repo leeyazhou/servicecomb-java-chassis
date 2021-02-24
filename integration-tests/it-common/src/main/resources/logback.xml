@@ -20,12 +20,20 @@
   <jmxConfigurator/>
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
-      <pattern>%d [%level] [%thread] - %msg (%F:%L\)%n</pattern>
+      <pattern>%d [%level] [%thread][%marker] - %msg (%F:%L\)%n</pattern>
+    </encoder>
+  </appender>
+  <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+    <file>servicecomb.log</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%d [%level] [%thread][%marker] - %msg (%F:%L\)%n</pattern>
     </encoder>
   </appender>
   <logger name="org.apache.servicecomb.common.javassist.JavassistUtils" level="WARN"/>
   <logger name="org.apache.servicecomb.core.definition.schema.ProducerSchemaFactory" level="WARN"/>
-  <root level="INFO">
+  <root level="WARN">
     <appender-ref ref="STDOUT"/>
+    <appender-ref ref="FILE"/>
   </root>
 </configuration>

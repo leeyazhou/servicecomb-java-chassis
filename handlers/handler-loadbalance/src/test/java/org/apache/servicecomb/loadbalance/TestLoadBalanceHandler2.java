@@ -20,43 +20,45 @@ package org.apache.servicecomb.loadbalance;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
-import java.util.EventListener;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.xml.ws.Holder;
-
-import org.apache.servicecomb.core.CseContext;
+import org.apache.servicecomb.config.ConfigUtil;
 import org.apache.servicecomb.core.Endpoint;
 import org.apache.servicecomb.core.Invocation;
 import org.apache.servicecomb.core.NonSwaggerInvocation;
 import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
+import org.apache.servicecomb.core.definition.InvocationRuntimeType;
 import org.apache.servicecomb.core.definition.MicroserviceMeta;
 import org.apache.servicecomb.core.definition.OperationMeta;
 import org.apache.servicecomb.core.definition.SchemaMeta;
 import org.apache.servicecomb.core.provider.consumer.ReferenceConfig;
 import org.apache.servicecomb.core.transport.TransportManager;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.common.event.EventManager;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.loadbalance.event.IsolationServerEvent;
 import org.apache.servicecomb.loadbalance.filter.IsolationDiscoveryFilter;
 import org.apache.servicecomb.loadbalance.filter.ServerDiscoveryFilter;
 import org.apache.servicecomb.loadbalance.filter.ZoneAwareDiscoveryFilter;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
-import org.apache.servicecomb.serviceregistry.ServiceRegistry;
-import org.apache.servicecomb.serviceregistry.api.registry.DataCenterInfo;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstance;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstanceStatus;
-import org.apache.servicecomb.serviceregistry.cache.InstanceCacheManager;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryTree;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryTreeNode;
+import org.apache.servicecomb.localregistry.LocalRegistryStore;
+import org.apache.servicecomb.registry.DiscoveryManager;
+import org.apache.servicecomb.registry.api.registry.DataCenterInfo;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstance;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstanceStatus;
+import org.apache.servicecomb.registry.cache.InstanceCacheManager;
+import org.apache.servicecomb.registry.discovery.DiscoveryTree;
+import org.apache.servicecomb.registry.discovery.DiscoveryTreeNode;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -72,14 +74,27 @@ import mockit.MockUp;
 public class TestLoadBalanceHandler2 {
   private Holder<Long> mockTimeMillis;
 
+  private static SCBEngine scbEngine;
+
+  @BeforeClass
+  public static void beforeClass() {
+    ConfigUtil.installDynamicConfig();
+    ArchaiusUtils.setProperty("servicecomb.loadbalance.userDefinedEndpoint.enabled", "true");
+    scbEngine = SCBBootstrap.createSCBEngineForTest().run();
+  }
+
+  @AfterClass
+  public static void afterClass() {
+    scbEngine.destroy();
+    ArchaiusUtils.resetConfig();
+  }
+
   @Before
   public void setUp() {
-    // clear up load balance stats
-    //prepare for defineEndpointAndHandle
-    ArchaiusUtils.setProperty("servicecomb.loadbalance.userDefinedEndpoint.enabled", "true");
+
     // avoid mock
     ServiceCombLoadBalancerStats.INSTANCE.init();
-    ServiceCombServerStats.releaseTryingChance();
+    TestServiceCombServerStats.releaseTryingChance();
 
     mockTimeMillis = new Holder<>(1L);
     new MockUp<System>() {
@@ -92,15 +107,14 @@ public class TestLoadBalanceHandler2 {
 
   @After
   public void teardown() {
-    CseContext.getInstance().setTransportManager(null);
-    ArchaiusUtils.resetConfig();
-    ServiceCombServerStats.releaseTryingChance();
+    TestServiceCombServerStats.releaseTryingChance();
   }
 
   @Test
   public void testZoneAwareAndIsolationFilterWorks() throws Exception {
     ReferenceConfig referenceConfig = Mockito.mock(ReferenceConfig.class);
     OperationMeta operationMeta = Mockito.mock(OperationMeta.class);
+    InvocationRuntimeType invocationRuntimeType = Mockito.mock(InvocationRuntimeType.class);
     SchemaMeta schemaMeta = Mockito.mock(SchemaMeta.class);
     when(operationMeta.getSchemaMeta()).thenReturn(schemaMeta);
     MicroserviceMeta microserviceMeta = Mockito.mock(MicroserviceMeta.class);
@@ -109,10 +123,9 @@ public class TestLoadBalanceHandler2 {
     when(microserviceMeta.getAppId()).thenReturn("testApp");
     when(referenceConfig.getVersionRule()).thenReturn("0.0.0+");
     when(referenceConfig.getTransport()).thenReturn("rest");
-    Invocation invocation = new Invocation(referenceConfig, operationMeta, new Object[0]);
+    Invocation invocation = new Invocation(referenceConfig, operationMeta, invocationRuntimeType, new HashMap<>());
 
     InstanceCacheManager instanceCacheManager = Mockito.mock(InstanceCacheManager.class);
-    ServiceRegistry serviceRegistry = Mockito.mock(ServiceRegistry.class);
     TransportManager transportManager = Mockito.mock(TransportManager.class);
     Transport transport = Mockito.mock(Transport.class);
     ArchaiusUtils.setProperty("servicecomb.loadbalance.filter.operation.enabled", "false");
@@ -160,12 +173,9 @@ public class TestLoadBalanceHandler2 {
 
     Map<String, MicroserviceInstance> data = new HashMap<>();
     DiscoveryTreeNode parent = new DiscoveryTreeNode().name("parent").data(data);
-    CseContext.getInstance().setTransportManager(transportManager);
-
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-
-    when(serviceRegistry.getMicroserviceInstance()).thenReturn(myself);
-    when(serviceRegistry.getInstanceCacheManager()).thenReturn(instanceCacheManager);
+    scbEngine.setTransportManager(transportManager);
+    LocalRegistryStore.INSTANCE.initSelfWithMocked(null, myself);
+    mockUpInstanceCacheManager(instanceCacheManager);
     when(instanceCacheManager.getOrCreateVersionedCache("testApp", "testMicroserviceName", "0.0.0+"))
         .thenReturn(parent);
     when(transportManager.findTransport("rest")).thenReturn(transport);
@@ -232,10 +242,25 @@ public class TestLoadBalanceHandler2 {
     Assert.assertEquals("rest://localhost:9091", server.getEndpoint().getEndpoint());
   }
 
+  public class IsolationEndpointListener {
+    Holder<Integer> count;
+
+    public IsolationEndpointListener(Holder<Integer> count) {
+      this.count = count;
+    }
+
+    @Subscribe
+    public void listener(IsolationServerEvent event) {
+      count.value++;
+      Assert.assertSame("Isolation Endpoint", "rest://localhost:9090", event.getEndpoint().getEndpoint());
+    }
+  }
+
   @Test
   public void testIsolationEventWithEndpoint() throws Exception {
     ReferenceConfig referenceConfig = Mockito.mock(ReferenceConfig.class);
     OperationMeta operationMeta = Mockito.mock(OperationMeta.class);
+    InvocationRuntimeType invocationRuntimeType = Mockito.mock(InvocationRuntimeType.class);
     SchemaMeta schemaMeta = Mockito.mock(SchemaMeta.class);
     when(operationMeta.getSchemaMeta()).thenReturn(schemaMeta);
     MicroserviceMeta microserviceMeta = Mockito.mock(MicroserviceMeta.class);
@@ -244,10 +269,9 @@ public class TestLoadBalanceHandler2 {
     when(microserviceMeta.getAppId()).thenReturn("testApp");
     when(referenceConfig.getVersionRule()).thenReturn("0.0.0+");
     when(referenceConfig.getTransport()).thenReturn("rest");
-    Invocation invocation = new Invocation(referenceConfig, operationMeta, new Object[0]);
+    Invocation invocation = new Invocation(referenceConfig, operationMeta, invocationRuntimeType, new HashMap<>());
 
     InstanceCacheManager instanceCacheManager = Mockito.mock(InstanceCacheManager.class);
-    ServiceRegistry serviceRegistry = Mockito.mock(ServiceRegistry.class);
     TransportManager transportManager = Mockito.mock(TransportManager.class);
     Transport transport = Mockito.mock(Transport.class);
     ArchaiusUtils.setProperty("servicecomb.loadbalance.filter.operation.enabled", "false");
@@ -273,12 +297,10 @@ public class TestLoadBalanceHandler2 {
 
     Map<String, MicroserviceInstance> data = new HashMap<>();
     DiscoveryTreeNode parent = new DiscoveryTreeNode().name("parent").data(data);
-    CseContext.getInstance().setTransportManager(transportManager);
+    scbEngine.setTransportManager(transportManager);
 
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-
-    when(serviceRegistry.getMicroserviceInstance()).thenReturn(myself);
-    when(serviceRegistry.getInstanceCacheManager()).thenReturn(instanceCacheManager);
+    LocalRegistryStore.INSTANCE.initSelfWithMocked(null, myself);
+    mockUpInstanceCacheManager(instanceCacheManager);
     when(instanceCacheManager.getOrCreateVersionedCache("testApp", "testMicroserviceName", "0.0.0+"))
         .thenReturn(parent);
     when(transportManager.findTransport("rest")).thenReturn(transport);
@@ -309,13 +331,7 @@ public class TestLoadBalanceHandler2 {
     ArchaiusUtils.setProperty("servicecomb.loadbalance.isolation.minIsolationTime", "10");
 
     Holder<Integer> count = new Holder<>(0);
-    EventListener isolationEndpointListener = new EventListener() {
-      @Subscribe
-      public void listener(IsolationServerEvent event) {
-        count.value++;
-        Assert.assertSame("Isolation Endpoint", "rest://localhost:9090", event.getEndpoint().getEndpoint());
-      }
-    };
+    IsolationEndpointListener isolationEndpointListener = new IsolationEndpointListener(count);
     EventManager.getEventBus().register(isolationEndpointListener);
     Assert.assertEquals(0, count.value.intValue());
     loadBalancer = handler.getOrCreateLoadBalancer(invocation);
@@ -331,6 +347,7 @@ public class TestLoadBalanceHandler2 {
     ArchaiusUtils.setProperty("servicecomb.loadbalance.filter.isolation.emptyInstanceProtectionEnabled", "true");
     ReferenceConfig referenceConfig = Mockito.mock(ReferenceConfig.class);
     OperationMeta operationMeta = Mockito.mock(OperationMeta.class);
+    InvocationRuntimeType invocationRuntimeType = Mockito.mock(InvocationRuntimeType.class);
     SchemaMeta schemaMeta = Mockito.mock(SchemaMeta.class);
     when(operationMeta.getSchemaMeta()).thenReturn(schemaMeta);
     MicroserviceMeta microserviceMeta = Mockito.mock(MicroserviceMeta.class);
@@ -339,10 +356,9 @@ public class TestLoadBalanceHandler2 {
     when(microserviceMeta.getAppId()).thenReturn("testApp");
     when(referenceConfig.getVersionRule()).thenReturn("0.0.0+");
     when(referenceConfig.getTransport()).thenReturn("rest");
-    Invocation invocation = new Invocation(referenceConfig, operationMeta, new Object[0]);
+    Invocation invocation = new Invocation(referenceConfig, operationMeta, invocationRuntimeType, new HashMap<>());
 
     InstanceCacheManager instanceCacheManager = Mockito.mock(InstanceCacheManager.class);
-    ServiceRegistry serviceRegistry = Mockito.mock(ServiceRegistry.class);
     TransportManager transportManager = Mockito.mock(TransportManager.class);
     Transport transport = Mockito.mock(Transport.class);
     ArchaiusUtils.setProperty("servicecomb.loadbalance.filter.operation.enabled", "false");
@@ -390,12 +406,10 @@ public class TestLoadBalanceHandler2 {
 
     Map<String, MicroserviceInstance> data = new HashMap<>();
     DiscoveryTreeNode parent = new DiscoveryTreeNode().name("parent").data(data);
-    CseContext.getInstance().setTransportManager(transportManager);
+    scbEngine.setTransportManager(transportManager);
 
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-
-    when(serviceRegistry.getMicroserviceInstance()).thenReturn(myself);
-    when(serviceRegistry.getInstanceCacheManager()).thenReturn(instanceCacheManager);
+    LocalRegistryStore.INSTANCE.initSelfWithMocked(null, myself);
+    mockUpInstanceCacheManager(instanceCacheManager);
     when(instanceCacheManager.getOrCreateVersionedCache("testApp", "testMicroserviceName", "0.0.0+"))
         .thenReturn(parent);
     when(transportManager.findTransport("rest")).thenReturn(transport);
@@ -469,7 +483,6 @@ public class TestLoadBalanceHandler2 {
     });
 
     InstanceCacheManager instanceCacheManager = Mockito.mock(InstanceCacheManager.class);
-    ServiceRegistry serviceRegistry = Mockito.mock(ServiceRegistry.class);
     TransportManager transportManager = Mockito.mock(TransportManager.class);
     Transport transport = Mockito.mock(Transport.class);
     ArchaiusUtils.setProperty("servicecomb.loadbalance.filter.operation.enabled", "false");
@@ -517,12 +530,10 @@ public class TestLoadBalanceHandler2 {
 
     Map<String, MicroserviceInstance> data = new HashMap<>();
     DiscoveryTreeNode parent = new DiscoveryTreeNode().name("parent").data(data);
-    CseContext.getInstance().setTransportManager(transportManager);
+    scbEngine.setTransportManager(transportManager);
 
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-
-    when(serviceRegistry.getMicroserviceInstance()).thenReturn(myself);
-    when(serviceRegistry.getInstanceCacheManager()).thenReturn(instanceCacheManager);
+    LocalRegistryStore.INSTANCE.initSelfWithMocked(null, myself);
+    mockUpInstanceCacheManager(instanceCacheManager);
     when(instanceCacheManager.getOrCreateVersionedCache("testApp", "testMicroserviceName", "0.0.0+"))
         .thenReturn(parent);
     when(transportManager.findTransport("rest")).thenReturn(transport);
@@ -612,7 +623,6 @@ public class TestLoadBalanceHandler2 {
     });
 
     InstanceCacheManager instanceCacheManager = Mockito.mock(InstanceCacheManager.class);
-    ServiceRegistry serviceRegistry = Mockito.mock(ServiceRegistry.class);
     TransportManager transportManager = Mockito.mock(TransportManager.class);
     Transport transport = Mockito.mock(Transport.class);
     ArchaiusUtils.setProperty("servicecomb.loadbalance.filter.operation.enabled", "false");
@@ -661,12 +671,10 @@ public class TestLoadBalanceHandler2 {
 
     Map<String, MicroserviceInstance> data = new HashMap<>();
     DiscoveryTreeNode parent = new DiscoveryTreeNode().name("parent").data(data);
-    CseContext.getInstance().setTransportManager(transportManager);
+    scbEngine.setTransportManager(transportManager);
 
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-
-    when(serviceRegistry.getMicroserviceInstance()).thenReturn(myself);
-    when(serviceRegistry.getInstanceCacheManager()).thenReturn(instanceCacheManager);
+    LocalRegistryStore.INSTANCE.initSelfWithMocked(null, myself);
+    mockUpInstanceCacheManager(instanceCacheManager);
     when(instanceCacheManager.getOrCreateVersionedCache("testApp", "testMicroserviceName", "0.0.0+"))
         .thenReturn(parent);
     when(transportManager.findTransport("rest")).thenReturn(transport);
@@ -751,6 +759,7 @@ public class TestLoadBalanceHandler2 {
   public void testConfigEndpoint() {
     ReferenceConfig referenceConfig = Mockito.mock(ReferenceConfig.class);
     OperationMeta operationMeta = Mockito.mock(OperationMeta.class);
+    InvocationRuntimeType invocationRuntimeType = Mockito.mock(InvocationRuntimeType.class);
     SchemaMeta schemaMeta = Mockito.mock(SchemaMeta.class);
     when(operationMeta.getSchemaMeta()).thenReturn(schemaMeta);
     MicroserviceMeta microserviceMeta = Mockito.mock(MicroserviceMeta.class);
@@ -759,11 +768,10 @@ public class TestLoadBalanceHandler2 {
     when(microserviceMeta.getAppId()).thenReturn("testApp");
     when(referenceConfig.getVersionRule()).thenReturn("0.0.0+");
     when(referenceConfig.getTransport()).thenReturn("rest");
-    Invocation invocation = new Invocation(referenceConfig, operationMeta, new Object[0]);
+    Invocation invocation = new Invocation(referenceConfig, operationMeta, invocationRuntimeType, new HashMap<>());
     AsyncResponse asyncResp = Mockito.mock(AsyncResponse.class);
 
     InstanceCacheManager instanceCacheManager = Mockito.mock(InstanceCacheManager.class);
-    ServiceRegistry serviceRegistry = Mockito.mock(ServiceRegistry.class);
     TransportManager transportManager = Mockito.mock(TransportManager.class);
     Transport transport = Mockito.mock(Transport.class);
     ArchaiusUtils.setProperty("servicecomb.loadbalance.filter.operation.enabled", "false");
@@ -779,29 +787,27 @@ public class TestLoadBalanceHandler2 {
 
     Map<String, MicroserviceInstance> data = new HashMap<>();
     DiscoveryTreeNode parent = new DiscoveryTreeNode().name("parent").data(data);
-    CseContext.getInstance().setTransportManager(transportManager);
+    scbEngine.setTransportManager(transportManager);
     SCBEngine.getInstance().setTransportManager(transportManager);
 
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-
-    when(serviceRegistry.getMicroserviceInstance()).thenReturn(myself);
-    when(serviceRegistry.getInstanceCacheManager()).thenReturn(instanceCacheManager);
+    LocalRegistryStore.INSTANCE.initSelfWithMocked(null, myself);
+    mockUpInstanceCacheManager(instanceCacheManager);
     when(instanceCacheManager.getOrCreateVersionedCache("testApp", "testMicroserviceName", "0.0.0+"))
         .thenReturn(parent);
     when(transportManager.findTransport("rest")).thenReturn(transport);
 
-    LoadbalanceHandler handler = null;
-
-    handler = new LoadbalanceHandler();
     data.put("findInstance", findInstance);
     parent.cacheVersion(1);
-    handler = new LoadbalanceHandler();
+    LoadbalanceHandler handler = new LoadbalanceHandler();
     try {
       handler.handle(invocation, asyncResp);
     } catch (Exception e) {
 
     }
     Assert.assertEquals("rest://localhost:9092", invocation.getEndpoint().getEndpoint());
+
+    // reset
+    invocation.setEndpoint(null);
 
     //success
     invocation.addLocalContext("scb-endpoint", "rest://127.0.0.1:8080?sslEnabled=true&protocol=http2");
@@ -812,6 +818,9 @@ public class TestLoadBalanceHandler2 {
     }
     Assert.assertEquals("rest://127.0.0.1:8080?sslEnabled=true&protocol=http2", invocation.getEndpoint().getEndpoint());
 
+    // reset
+    invocation.setEndpoint(null);
+
     //endpoint format is not correct
     invocation.addLocalContext("scb-endpoint", "127.0.0.1:8080");
     try {
@@ -821,6 +830,9 @@ public class TestLoadBalanceHandler2 {
       Assert.assertTrue(e.getMessage()
           .contains("Illegal character in scheme name"));
     }
+
+    // reset
+    invocation.setEndpoint(null);
 
     //transport is not find
     invocation.addLocalContext("scb-endpoint", "my://127.0.0.1:8080?sslEnabled=true&protocol=http2");
@@ -849,12 +861,12 @@ public class TestLoadBalanceHandler2 {
         (inv, aysnc) -> {
           Assert.assertEquals("rest://127.0.0.1:8080", inv.getEndpoint().getEndpoint());
           Assert.assertTrue(serviceCombServerStats.isIsolated());
-          Assert.assertEquals(5, serviceCombServerStats.getCountinuousFailureCount());
+          Assert.assertEquals(5, serviceCombServerStats.getContinuousFailureCount());
           Assert.assertFalse(ServiceCombServerStats.isolatedServerCanTry());
           aysnc.success("OK");
         });
 
-    Assert.assertTrue(ServiceCombServerStats.applyForTryingChance());
+    Assert.assertTrue(ServiceCombServerStats.applyForTryingChance(invocation));
     invocation.addLocalContext(IsolationDiscoveryFilter.TRYING_INSTANCES_EXISTING, true);
     try {
       handler.handle(invocation, (response) -> Assert.assertEquals("OK", response.getResult()));
@@ -863,7 +875,7 @@ public class TestLoadBalanceHandler2 {
     }
     Assert.assertEquals("rest://127.0.0.1:8080", invocation.getEndpoint().getEndpoint());
     Assert.assertTrue(serviceCombServerStats.isIsolated());
-    Assert.assertEquals(0, serviceCombServerStats.getCountinuousFailureCount());
+    Assert.assertEquals(0, serviceCombServerStats.getContinuousFailureCount());
     Assert.assertTrue(ServiceCombServerStats.isolatedServerCanTry());
   }
 
@@ -894,16 +906,16 @@ public class TestLoadBalanceHandler2 {
         (inv, aysnc) -> {
           Assert.assertFalse(stats0.isIsolated());
           Assert.assertTrue(stats1.isIsolated());
-          Assert.assertEquals(5, stats1.getCountinuousFailureCount());
+          Assert.assertEquals(5, stats1.getContinuousFailureCount());
           Assert.assertFalse(ServiceCombServerStats.isolatedServerCanTry());
           if (counter.value == 0) {
             Assert.assertEquals("rest://127.0.0.1:8080", inv.getEndpoint().getEndpoint());
-            Assert.assertEquals(0, stats0.getCountinuousFailureCount());
+            Assert.assertEquals(0, stats0.getContinuousFailureCount());
             counter.value++;
             aysnc.producerFail(new InvocationException(503, "RETRY", "retry to next instance"));
           } else if (counter.value == 1) {
             Assert.assertEquals("rest://127.0.0.1:8081", inv.getEndpoint().getEndpoint());
-            Assert.assertEquals(1, stats0.getCountinuousFailureCount());
+            Assert.assertEquals(1, stats0.getContinuousFailureCount());
             counter.value++;
             aysnc.success("OK");
           } else {
@@ -911,7 +923,7 @@ public class TestLoadBalanceHandler2 {
           }
         });
 
-    Assert.assertTrue(ServiceCombServerStats.applyForTryingChance());
+    Assert.assertTrue(ServiceCombServerStats.applyForTryingChance(invocation));
     invocation.addLocalContext(IsolationDiscoveryFilter.TRYING_INSTANCES_EXISTING, true);
     try {
       handler.handle(invocation, (response) -> Assert.assertEquals("OK", response.getResult()));
@@ -920,9 +932,9 @@ public class TestLoadBalanceHandler2 {
     }
     Assert.assertEquals("rest://127.0.0.1:8081", invocation.getEndpoint().getEndpoint());
     Assert.assertFalse(stats0.isIsolated());
-    Assert.assertEquals(1, stats0.getCountinuousFailureCount());
+    Assert.assertEquals(1, stats0.getContinuousFailureCount());
     Assert.assertTrue(stats1.isIsolated());
-    Assert.assertEquals(0, stats1.getCountinuousFailureCount());
+    Assert.assertEquals(0, stats1.getContinuousFailureCount());
     Assert.assertTrue(ServiceCombServerStats.isolatedServerCanTry());
   }
 
@@ -947,7 +959,7 @@ public class TestLoadBalanceHandler2 {
   private ServiceCombServer createMockedServer(String microserviceInstanceId, String endpoint) {
     MicroserviceInstance microserviceInstance = new MicroserviceInstance();
     microserviceInstance.setInstanceId(microserviceInstanceId);
-    return new ServiceCombServer(
+    return new ServiceCombServer(null,
         new Endpoint(Mockito.mock(Transport.class), endpoint),
         microserviceInstance);
   }
@@ -967,5 +979,14 @@ public class TestLoadBalanceHandler2 {
 
   private void mockDelayMillis(long delay) {
     mockTimeMillis.value += delay;
+  }
+
+  private void mockUpInstanceCacheManager(InstanceCacheManager instanceCacheManager) {
+    new MockUp<DiscoveryManager>() {
+      @Mock
+      public InstanceCacheManager getInstanceCacheManager() {
+        return instanceCacheManager;
+      }
+    };
   }
 }

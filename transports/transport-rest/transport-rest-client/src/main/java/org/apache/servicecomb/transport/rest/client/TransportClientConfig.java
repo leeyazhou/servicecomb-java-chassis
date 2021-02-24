@@ -68,6 +68,13 @@ public final class TransportClientConfig {
         .get();
   }
 
+  public static boolean isHttp2TransportClientEnabled() {
+    return DynamicPropertyFactory.getInstance()
+        .getBooleanProperty("servicecomb.rest.client.http2.enabled",
+            true)
+        .get();
+  }
+
   public static int getConnectionMaxPoolSize() {
     return DynamicPropertyFactory.getInstance()
         .getIntProperty("servicecomb.rest.client.connection.maxPoolSize", HttpClientOptions.DEFAULT_MAX_POOL_SIZE)
@@ -76,7 +83,7 @@ public final class TransportClientConfig {
 
   public static int getConnectionIdleTimeoutInSeconds() {
     return DynamicPropertyFactory.getInstance()
-        .getIntProperty("servicecomb.rest.client.connection.idleTimeoutInSeconds", 30)
+        .getIntProperty("servicecomb.rest.client.connection.idleTimeoutInSeconds", 60)
         .get();
   }
 
@@ -99,10 +106,23 @@ public final class TransportClientConfig {
         .get();
   }
 
-  public static int getMaxWaitQueueSize(){
+  public static int getMaxWaitQueueSize() {
     return DynamicPropertyFactory.getInstance()
         .getIntProperty("servicecomb.rest.client.maxWaitQueueSize",
             HttpClientOptions.DEFAULT_MAX_WAIT_QUEUE_SIZE)
+        .get();
+  }
+
+  public static boolean isHttpTransportClientEnabled() {
+    return DynamicPropertyFactory.getInstance()
+        .getBooleanProperty("servicecomb.rest.client.enabled",
+            true)
+        .get();
+  }
+
+  public static int getConnectionTimeoutInMillis() {
+    return DynamicPropertyFactory.getInstance()
+        .getIntProperty("servicecomb.rest.client.connection.timeoutInMillis", 1000)
         .get();
   }
 }

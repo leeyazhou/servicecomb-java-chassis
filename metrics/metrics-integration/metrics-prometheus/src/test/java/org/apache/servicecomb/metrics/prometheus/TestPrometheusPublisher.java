@@ -28,7 +28,7 @@ import org.apache.commons.lang3.reflect.FieldUtils;
 import org.apache.servicecomb.foundation.common.exceptions.ServiceCombException;
 import org.apache.servicecomb.foundation.metrics.registry.GlobalRegistry;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
+import org.apache.servicecomb.registry.RegistrationManager;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -84,9 +84,9 @@ public class TestPrometheusPublisher {
 
   @Test
   public void collect() throws IllegalAccessException, IOException {
-    new Expectations(RegistryUtils.class) {
+    new Expectations(RegistrationManager.INSTANCE) {
       {
-        RegistryUtils.getAppId();
+        RegistrationManager.INSTANCE.getAppId();
         result = "testAppId";
       }
     };

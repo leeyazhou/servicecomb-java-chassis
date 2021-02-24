@@ -21,11 +21,10 @@ import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 
 import javax.ws.rs.core.Response.Status;
-import javax.xml.ws.Holder;
 
 import org.apache.servicecomb.codec.protobuf.definition.OperationProtobuf;
 import org.apache.servicecomb.codec.protobuf.definition.ProtobufManager;
-import org.apache.servicecomb.codec.protobuf.utils.WrapSchema;
+import org.apache.servicecomb.codec.protobuf.definition.ResponseRootSerializer;
 import org.apache.servicecomb.core.Const;
 import org.apache.servicecomb.core.Endpoint;
 import org.apache.servicecomb.core.Handler;
@@ -35,6 +34,7 @@ import org.apache.servicecomb.core.definition.MicroserviceMeta;
 import org.apache.servicecomb.core.definition.OperationMeta;
 import org.apache.servicecomb.core.definition.SchemaMeta;
 import org.apache.servicecomb.core.invocation.InvocationFactory;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.vertx.tcp.TcpConnection;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
@@ -52,8 +52,6 @@ public class HighwayServerInvoke {
 
   private OperationMeta operationMeta;
 
-  private OperationProtobuf operationProtobuf;
-
   private TcpConnection connection;
 
   private long msgId;
@@ -62,9 +60,11 @@ public class HighwayServerInvoke {
 
   private Endpoint endpoint;
 
-  Invocation invocation;
+  private Invocation invocation;
 
-  protected long start;
+  private OperationProtobuf operationProtobuf;
+
+  private long start;
 
   public HighwayServerInvoke(Endpoint endpoint) {
     this.start = System.nanoTime();
@@ -97,8 +97,6 @@ public class HighwayServerInvoke {
     MicroserviceMeta microserviceMeta = SCBEngine.getInstance().getProducerMicroserviceMeta();
     SchemaMeta schemaMeta = microserviceMeta.ensureFindSchemaMeta(header.getSchemaId());
     this.operationMeta = schemaMeta.ensureFindOperation(header.getOperationName());
-    this.operationProtobuf = ProtobufManager.getOrCreateOperation(operationMeta);
-
     this.bodyBuffer = bodyBuffer;
   }
 
@@ -141,9 +139,9 @@ public class HighwayServerInvoke {
     header.setStatusCode(response.getStatusCode());
     header.setReasonPhrase(response.getReasonPhrase());
     header.setContext(context);
-    header.setHeaders(response.getHeaders());
+    header.fromMultiMap(response.getHeaders());
 
-    WrapSchema bodySchema = operationProtobuf.findResponseSchema(response.getStatusCode());
+    ResponseRootSerializer bodySchema = operationProtobuf.findResponseRootSerializer(response.getStatusCode());
     Object body = response.getResult();
     if (response.isFailed()) {
       body = ((InvocationException) body).getErrorData();
@@ -154,9 +152,9 @@ public class HighwayServerInvoke {
       invocation.getInvocationStageTrace().finishServerFiltersResponse();
       connection.write(respBuffer.getByteBuf());
     } catch (Exception e) {
-      // 没招了，直接打日志
+      // keep highway performance and simple, this encoding/decoding error not need handle by client
       String msg = String.format("encode response failed, %s, msgId=%d",
-          operationProtobuf.getOperationMeta().getMicroserviceQualifiedName(),
+          invocation.getOperationMeta().getMicroserviceQualifiedName(),
           msgId);
       LOGGER.error(msg, e);
     } finally {
@@ -172,8 +170,17 @@ public class HighwayServerInvoke {
   public void execute() {
     try {
       invocation = InvocationFactory.forProvider(endpoint,
-          operationProtobuf.getOperationMeta(),
+          operationMeta,
           null);
+      operationProtobuf = ProtobufManager.getOrCreateOperation(invocation);
+      HighwayTransportContext transportContext = new HighwayTransportContext()
+          .setConnection(connection)
+          .setMsgId(msgId)
+          .setHeader(header)
+          .setBodyBuffer(bodyBuffer)
+          .setOperationProtobuf(ProtobufManager.getOrCreateOperation(invocation));
+      invocation.setTransportContext(transportContext);
+
       invocation.onStart(null, start);
       invocation.getInvocationStageTrace().startSchedule();
 

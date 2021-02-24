@@ -17,6 +17,9 @@
 
 package org.apache.servicecomb.common.rest;
 
+import static com.google.common.net.HttpHeaders.CONTENT_LENGTH;
+import static com.google.common.net.HttpHeaders.TRANSFER_ENCODING;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
 import java.util.Arrays;
@@ -26,21 +29,27 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
+import javax.servlet.AsyncContext;
+import javax.servlet.http.HttpServletResponse;
+import javax.ws.rs.core.HttpHeaders;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response.Status;
-import javax.xml.ws.Holder;
 
 import org.apache.servicecomb.common.rest.codec.produce.ProduceProcessorManager;
+import org.apache.servicecomb.common.rest.definition.RestMetaUtils;
 import org.apache.servicecomb.common.rest.definition.RestOperationMeta;
 import org.apache.servicecomb.common.rest.filter.HttpServerFilter;
 import org.apache.servicecomb.common.rest.filter.HttpServerFilterBaseForTest;
 import org.apache.servicecomb.common.rest.locator.OperationLocator;
 import org.apache.servicecomb.common.rest.locator.ServicePathManager;
+import org.apache.servicecomb.common.rest.locator.TestPathSchema;
+import org.apache.servicecomb.config.ConfigUtil;
 import org.apache.servicecomb.core.Const;
 import org.apache.servicecomb.core.Endpoint;
 import org.apache.servicecomb.core.Handler;
 import org.apache.servicecomb.core.Invocation;
 import org.apache.servicecomb.core.SCBEngine;
-import org.apache.servicecomb.core.SCBStatus;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
 import org.apache.servicecomb.core.definition.MicroserviceMeta;
 import org.apache.servicecomb.core.definition.OperationMeta;
 import org.apache.servicecomb.core.definition.SchemaMeta;
@@ -48,31 +57,32 @@ import org.apache.servicecomb.core.event.InvocationFinishEvent;
 import org.apache.servicecomb.core.event.InvocationStartEvent;
 import org.apache.servicecomb.core.executor.ReactiveExecutor;
 import org.apache.servicecomb.core.provider.consumer.ReferenceConfig;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.common.event.EventManager;
 import org.apache.servicecomb.foundation.common.utils.JsonUtils;
 import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
+import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.foundation.test.scaffolding.exception.RuntimeExceptionWithoutStackTrace;
 import org.apache.servicecomb.foundation.vertx.http.AbstractHttpServletRequest;
 import org.apache.servicecomb.foundation.vertx.http.AbstractHttpServletResponse;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletRequestEx;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletResponseEx;
+import org.apache.servicecomb.foundation.vertx.http.StandardHttpServletResponseEx;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.context.HttpStatus;
 import org.apache.servicecomb.swagger.invocation.exception.CommonExceptionData;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
-import org.apache.servicecomb.swagger.invocation.response.Headers;
 import org.hamcrest.Matchers;
-import org.junit.AfterClass;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
 
+import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import mockit.Deencapsulation;
 import mockit.Expectations;
@@ -85,27 +95,26 @@ public class TestAbstractRestInvocation {
   HttpServletRequestEx requestEx;
 
   @Mocked
+  HttpServletResponse servletResponse;
+
   HttpServletResponseEx responseEx;
 
   @Mocked
   ReferenceConfig endpoint;
 
   @Mocked
-  SchemaMeta schemaMeta;
-
-  @Mocked
-  OperationMeta operationMeta;
-
-  @Mocked
-  RestOperationMeta restOperation;
-
-  @Mocked
-  Object[] swaggerArguments;
+  Map<String, Object> arguments;
 
   Invocation invocation;
 
   @Rule
   public ExpectedException expectedException = ExpectedException.none();
+
+  static SCBEngine scbEngine;
+
+  static OperationMeta operationMeta;
+
+  static RestOperationMeta restOperation;
 
   class AbstractHttpServletRequestForTest extends AbstractHttpServletRequest {
     @Override
@@ -130,10 +139,14 @@ public class TestAbstractRestInvocation {
 
   static long nanoTime = 123;
 
-  @BeforeClass
-  public static void classSetup() {
-    EventManager.eventBus = new EventBus();
-    SCBEngine.getInstance().setStatus(SCBStatus.UP);
+  @Before
+  public void setup() {
+    ConfigUtil.installDynamicConfig();
+    scbEngine = SCBBootstrap.createSCBEngineForTest()
+        .addProducerMeta("sid1", new TestPathSchema())
+        .run();
+    operationMeta = scbEngine.getProducerMicroserviceMeta().operationMetas().get("test.sid1.dynamicId");
+    restOperation = RestMetaUtils.getRestOperationMeta(operationMeta);
 
     new MockUp<System>() {
       @Mock
@@ -141,25 +154,26 @@ public class TestAbstractRestInvocation {
         return nanoTime;
       }
     };
-  }
 
-  @AfterClass
-  public static void classTeardown() {
-    EventManager.eventBus = new EventBus();
-    SCBEngine.getInstance().setStatus(SCBStatus.DOWN);
-  }
+    if (responseEx == null) {
+      responseEx = new StandardHttpServletResponseEx(servletResponse);
+    }
 
-  @Before
-  public void setup() {
-    invocation = new Invocation(endpoint, operationMeta, swaggerArguments);
+    invocation = new Invocation(endpoint, operationMeta, operationMeta.buildBaseConsumerRuntimeType(), arguments);
 
     initRestInvocation();
     List<HttpServerFilter> httpServerFilters = SPIServiceUtils.getSortedService(HttpServerFilter.class);
     restInvocation.setHttpServerFilters(httpServerFilters);
   }
 
+  @After
+  public void teardown() {
+    ArchaiusUtils.resetConfig();
+    scbEngine.destroy();
+  }
+
   private void initRestInvocation() {
-    restInvocation.produceProcessor = ProduceProcessorManager.JSON_PROCESSOR;
+    restInvocation.produceProcessor = ProduceProcessorManager.INSTANCE.findDefaultJsonProcessor();
     restInvocation.requestEx = requestEx;
     restInvocation.responseEx = responseEx;
     restInvocation.invocation = invocation;
@@ -177,11 +191,10 @@ public class TestAbstractRestInvocation {
   public void initProduceProcessorNull() {
     new Expectations() {
       {
-        restOperation.ensureFindProduceProcessor(requestEx);
-        result = null;
+        requestEx.getHeader(HttpHeaders.ACCEPT);
+        result = "notExistType";
       }
     };
-
     restInvocation = new AbstractRestInvocationForTest() {
       @Override
       public void sendFailResponse(Throwable throwable) {
@@ -189,24 +202,22 @@ public class TestAbstractRestInvocation {
     };
     initRestInvocation();
 
-    try {
-      restInvocation.initProduceProcessor();
-      Assert.fail("must throw exception");
-    } catch (InvocationException e) {
-      assertEquals(Status.NOT_ACCEPTABLE, e.getStatus());
-      assertEquals("Accept null is not supported", ((CommonExceptionData) e.getErrorData()).getMessage());
-    }
+    expectedException.expect(InvocationException.class);
+    expectedException
+        .expectMessage(
+            "InvocationException: code=406;msg=CommonExceptionData [message=Accept notExistType is not supported]");
+
+    restInvocation.initProduceProcessor();
   }
 
   @Test
   public void initProduceProcessorNormal() {
     new Expectations() {
       {
-        restOperation.ensureFindProduceProcessor(requestEx);
-        result = ProduceProcessorManager.JSON_PROCESSOR;
+        requestEx.getHeader(HttpHeaders.ACCEPT);
+        result = MediaType.APPLICATION_JSON;
       }
     };
-
     // not throw exception
     restInvocation.initProduceProcessor();
   }
@@ -439,10 +450,13 @@ public class TestAbstractRestInvocation {
 
   @Test
   public void sendFailResponseNoProduceProcessor() {
+    invocation.onStart(0);
+
     restInvocation.produceProcessor = null;
     restInvocation.sendFailResponse(new RuntimeExceptionWithoutStackTrace());
 
-    Assert.assertSame(ProduceProcessorManager.JSON_PROCESSOR, restInvocation.produceProcessor);
+    Assert.assertSame(ProduceProcessorManager.INSTANCE.findDefaultJsonProcessor(),
+        restInvocation.produceProcessor);
   }
 
   @Test
@@ -459,23 +473,32 @@ public class TestAbstractRestInvocation {
       }
     };
     initRestInvocation();
-    restInvocation.produceProcessor = ProduceProcessorManager.PLAIN_PROCESSOR;
+    restInvocation.produceProcessor = ProduceProcessorManager.INSTANCE.findDefaultPlainProcessor();
 
     Throwable e = new InvocationException(Status.BAD_GATEWAY, "");
     restInvocation.sendFailResponse(e);
     Assert.assertSame(e, result.value.getResult());
-    Assert.assertSame(ProduceProcessorManager.PLAIN_PROCESSOR, restInvocation.produceProcessor);
+    Assert.assertSame(
+        ProduceProcessorManager.INSTANCE.findDefaultPlainProcessor(), restInvocation.produceProcessor);
+  }
+
+  public static class SendResponseQuietlyNormalEventHandler {
+    private Holder<InvocationFinishEvent> eventHolder;
+
+    public SendResponseQuietlyNormalEventHandler(Holder<InvocationFinishEvent> eventHolder) {
+      this.eventHolder = eventHolder;
+    }
+
+    @Subscribe
+    public void onFinished(InvocationFinishEvent event) {
+      eventHolder.value = event;
+    }
   }
 
   @Test
   public void sendResponseQuietlyNormal(@Mocked Response response) {
     Holder<InvocationFinishEvent> eventHolder = new Holder<>();
-    Object subscriber = new Object() {
-      @Subscribe
-      public void onFinished(InvocationFinishEvent event) {
-        eventHolder.value = event;
-      }
-    };
+    SendResponseQuietlyNormalEventHandler subscriber = new SendResponseQuietlyNormalEventHandler(eventHolder);
     EventManager.register(subscriber);
 
     Holder<Response> result = new Holder<>();
@@ -490,6 +513,7 @@ public class TestAbstractRestInvocation {
         super.sendResponse(response);
       }
     };
+    invocation.onStart(0);
     initRestInvocation();
 
     restInvocation.sendResponseQuietly(response);
@@ -601,6 +625,7 @@ public class TestAbstractRestInvocation {
     expected.put("reasonPhrase", "reason");
     expected.put("contentType", "application/json; charset=utf-8");
 
+    invocation.onStart(0);
     initRestInvocation();
 
     restInvocation.sendResponse(response);
@@ -608,8 +633,11 @@ public class TestAbstractRestInvocation {
   }
 
   @Test
-  public void testDoSendResponseHeaderNull(@Mocked Response response) {
-    Headers headers = new Headers();
+  public void should_ignore_content_length_and_transfer_encoding_when_copy_header_to_http_response(
+      @Mocked Response response) {
+    MultiMap headers = MultiMap.caseInsensitiveMultiMap()
+        .set(CONTENT_LENGTH, "10")
+        .set(TRANSFER_ENCODING, "encoding");
 
     new Expectations() {
       {
@@ -620,7 +648,7 @@ public class TestAbstractRestInvocation {
       }
     };
 
-    Headers resultHeaders = new Headers();
+    MultiMap resultHeaders = MultiMap.caseInsensitiveMultiMap();
     responseEx = new MockUp<HttpServletResponseEx>() {
       private Map<String, Object> attributes = new HashMap<>();
 
@@ -636,26 +664,24 @@ public class TestAbstractRestInvocation {
 
       @Mock
       void addHeader(String name, String value) {
-        resultHeaders.addHeader(name, value);
+        resultHeaders.add(name, value);
       }
     }.getMockInstance();
 
+    invocation.onStart(0);
     initRestInvocation();
 
-    try {
-      restInvocation.sendResponse(response);
-      Assert.fail("must throw exception");
-    } catch (Error e) {
-      Assert.assertNull(resultHeaders.getHeaderMap());
-    }
+    restInvocation.sendResponse(response);
+    assertThat(headers).isEmpty();
+    assertThat(resultHeaders).isEmpty();
   }
 
   @Test
   public void testDoSendResponseHeaderNormal(@Mocked Response response) {
-    Headers headers = new Headers();
-    headers.addHeader("h1", "h1v1");
-    headers.addHeader("h1", "h1v2");
-    headers.addHeader("h2", "h2v");
+    MultiMap headers = MultiMap.caseInsensitiveMultiMap();
+    headers.add("h1", "h1v1");
+    headers.add("h1", "h1v2");
+    headers.add("h2", "h2v");
 
     new Expectations() {
       {
@@ -666,7 +692,7 @@ public class TestAbstractRestInvocation {
       }
     };
 
-    Headers resultHeaders = new Headers();
+    MultiMap resultHeaders = MultiMap.caseInsensitiveMultiMap();
     responseEx = new MockUp<HttpServletResponseEx>() {
       private Map<String, Object> attributes = new HashMap<>();
 
@@ -682,16 +708,18 @@ public class TestAbstractRestInvocation {
 
       @Mock
       void addHeader(String name, String value) {
-        resultHeaders.addHeader(name, value);
+        resultHeaders.add(name, value);
       }
     }.getMockInstance();
+
+    invocation.onStart(0);
     initRestInvocation();
 
     try {
       restInvocation.sendResponse(response);
       Assert.fail("must throw exception");
     } catch (Error e) {
-      assertEquals(headers.getHeaderMap(), resultHeaders.getHeaderMap());
+      assertEquals(headers.toString(), resultHeaders.toString());
     }
   }
 
@@ -723,6 +751,8 @@ public class TestAbstractRestInvocation {
         buffer.appendBuffer(bodyBuffer);
       }
     }.getMockInstance();
+
+    invocation.onStart(0);
     initRestInvocation();
 
     restInvocation.sendResponse(response);
@@ -732,8 +762,8 @@ public class TestAbstractRestInvocation {
 
   @Test
   public void testDoSendResponseResultOKFilter(@Mocked Response response) {
-    Headers headers = new Headers();
-    headers.addHeader("Content-Type", "application/json");
+    MultiMap headers = MultiMap.caseInsensitiveMultiMap();
+    headers.set("Content-Type", "application/json");
     new Expectations() {
       {
         response.getHeaders();
@@ -774,6 +804,7 @@ public class TestAbstractRestInvocation {
       }
     };
 
+    invocation.onStart(0);
     initRestInvocation();
     List<HttpServerFilter> httpServerFilters = SPIServiceUtils.loadSortedService(HttpServerFilter.class);
     httpServerFilters.add(filter);
@@ -854,6 +885,8 @@ public class TestAbstractRestInvocation {
       @Override
       public void sendFailResponse(Throwable throwable) {
         result.value = throwable;
+
+        invocation.onFinish(Response.ok(null));
       }
     };
     restInvocation.requestEx = requestEx;
@@ -892,6 +925,8 @@ public class TestAbstractRestInvocation {
 
     // will not throw exception
     restInvocation.scheduleInvocation();
+
+    invocation.onFinish(Response.ok(null));
   }
 
   @Test
@@ -916,6 +951,8 @@ public class TestAbstractRestInvocation {
       @Override
       public void sendFailResponse(Throwable throwable) {
         holder.value = throwable;
+
+        invocation.onFinish(Response.ok(null));
       }
     };
     restInvocation.requestEx = requestEx;
@@ -926,15 +963,23 @@ public class TestAbstractRestInvocation {
     Assert.assertSame(rejectedExecutionException, holder.value);
   }
 
+  public static class ScheduleInvocationEventHandler {
+    private Holder<InvocationStartEvent> eventHolder;
+
+    public ScheduleInvocationEventHandler(Holder<InvocationStartEvent> eventHolder) {
+      this.eventHolder = eventHolder;
+    }
+
+    @Subscribe
+    public void onFinished(InvocationStartEvent event) {
+      eventHolder.value = event;
+    }
+  }
+
   @Test
   public void scheduleInvocationNormal(@Mocked OperationMeta operationMeta) {
     Holder<InvocationStartEvent> eventHolder = new Holder<>();
-    Object subscriber = new Object() {
-      @Subscribe
-      public void onStart(InvocationStartEvent event) {
-        eventHolder.value = event;
-      }
-    };
+    Object subscriber = new ScheduleInvocationEventHandler(eventHolder);
     EventManager.register(subscriber);
 
     Executor executor = new ReactiveExecutor();
@@ -956,6 +1001,8 @@ public class TestAbstractRestInvocation {
       @Override
       protected void runOnExecutor() {
         result.value = true;
+
+        invocation.onFinish(Response.ok(null));
       }
     };
     restInvocation.requestEx = requestEx;
@@ -1024,11 +1071,16 @@ public class TestAbstractRestInvocation {
   }
 
   @Test
-  public void scheduleInvocation_invocationContextDeserializeError() {
+  public void scheduleInvocation_invocationContextDeserializeError(@Mocked AsyncContext asyncContext) {
     requestEx = new AbstractHttpServletRequest() {
       @Override
       public String getHeader(String name) {
         return "{\"x-cse-src-microservice\":'source\"}";
+      }
+
+      @Override
+      public AsyncContext getAsyncContext() {
+        return asyncContext;
       }
     };
     Holder<Integer> status = new Holder<>();
@@ -1058,14 +1110,14 @@ public class TestAbstractRestInvocation {
     restInvocation.scheduleInvocation();
 
     assertEquals(Integer.valueOf(590), status.value);
-    assertEquals("Cse Internal Server Error", reasonPhrase.value);
+    assertEquals("Unexpected producer error, please check logs for details", reasonPhrase.value);
     assertEquals(Integer.valueOf(1), endCount.value);
   }
 
   @SuppressWarnings("deprecation")
   @Test
   public void scheduleInvocation_flowControlReject() {
-    new Expectations() {
+    new Expectations(operationMeta) {
       {
         operationMeta.getProviderQpsFlowControlHandler();
         result = (Handler) (invocation, asyncResp) -> asyncResp.producerFail(new InvocationException(
@@ -1100,8 +1152,7 @@ public class TestAbstractRestInvocation {
         responseBody.value = bodyBuffer.toString();
       }
     };
-    setup();
-
+    initRestInvocation();
     restInvocation.scheduleInvocation();
 
     assertEquals(Integer.valueOf(429), status.value);

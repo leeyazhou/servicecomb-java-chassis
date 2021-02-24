@@ -16,6 +16,11 @@
  */
 package org.apache.servicecomb.foundation.common.utils;
 
+import static org.apache.servicecomb.foundation.common.utils.LambdaMetafactoryUtils.createObjectGetter;
+import static org.apache.servicecomb.foundation.common.utils.LambdaMetafactoryUtils.createObjectSetter;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
+
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
@@ -32,9 +37,15 @@ import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Test;
 
+import com.fasterxml.jackson.databind.BeanDescription;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
+
 public class TestLambdaMetafactoryUtils {
-  static class Model {
-    private int f1;
+  public static class Model {
+    public int f1;
+
+    private int f2;
 
     public int getF1() {
       return f1;
@@ -42,6 +53,11 @@ public class TestLambdaMetafactoryUtils {
 
     public void setF1(int f1) {
       this.f1 = f1;
+    }
+
+    public Model fluentSetF1(int f1) {
+      this.f1 = f1;
+      return this;
     }
 
     public List<Integer> echo(List<Integer> value) {
@@ -72,6 +88,8 @@ public class TestLambdaMetafactoryUtils {
   public void createGetterSetterByMethod() throws Throwable {
     IntGetter<Model> getter = LambdaMetafactoryUtils.createGetter(Model.class.getMethod("getF1"));
     IntSetter<Model> setter = LambdaMetafactoryUtils.createSetter(Model.class.getMethod("setF1", int.class));
+    IntSetter<Model> fluentSetter = LambdaMetafactoryUtils
+        .createSetter(Model.class.getMethod("fluentSetF1", int.class));
     BiFunction<Object, Object, Object> echo = LambdaMetafactoryUtils
         .createLambda(Model.class.getMethod("echo", List.class), BiFunction.class);
 
@@ -79,15 +97,70 @@ public class TestLambdaMetafactoryUtils {
     int f1 = getter.get(model);
     Assert.assertEquals(1, f1);
     Assert.assertThat((List<Integer>) echo.apply(model, Arrays.asList(2)), Matchers.contains(2));
+
+    fluentSetter.set(model, 2);
+    int ff1 = getter.get(model);
+    Assert.assertEquals(2, ff1);
   }
 
   @Test
-  public void createGetterSetterByField() throws Throwable {
-    Field f1 = Model.class.getDeclaredField("f1");
-    Getter<Model, Integer> getter = LambdaMetafactoryUtils.createGetter(f1);
-    Setter<Model, Integer> setter = LambdaMetafactoryUtils.createSetter(f1);
+  public void should_failed_when_createGetterSetterByField_and_field_is_not_public() throws Throwable {
+    Field field = Model.class.getDeclaredField("f2");
+    assertThat(catchThrowable(() -> LambdaMetafactoryUtils.createGetter(field)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage(
+            "Can not access field, a public field or accessor is required.Declaring class is org.apache.servicecomb.foundation.common.utils.TestLambdaMetafactoryUtils$Model, field is f2");
+    assertThat(catchThrowable(() -> LambdaMetafactoryUtils.createSetter(field)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage(
+            "Can not access field, a public field or accessor is required.Declaring class is org.apache.servicecomb.foundation.common.utils.TestLambdaMetafactoryUtils$Model, field is f2");
+  }
 
-    setter.set(model, 1);
-    Assert.assertEquals(1, (int) getter.get(model));
+  public static class Base<T> {
+    private T base;
+
+    public T getBase() {
+      return base;
+    }
+
+    public Base<T> setBase(T base) {
+      this.base = base;
+      return this;
+    }
+  }
+
+  public static class Child extends Base<Integer> {
+    private int child;
+
+    public int getChild() {
+      return child;
+    }
+
+    public Child setChild(int child) {
+      this.child = child;
+      return this;
+    }
+  }
+
+  @Test
+  public void should_support_primitive_type() {
+    Child child = new Child();
+
+    ObjectMapper mapper = JsonUtils.OBJ_MAPPER;
+    BeanDescription beanDescription = mapper.getSerializationConfig().introspect(mapper.constructType(Child.class));
+    List<BeanPropertyDefinition> properties = beanDescription.findProperties();
+    assertThat(properties).hasSize(2);
+
+    for (int idx = 0; idx < properties.size(); idx++) {
+      BeanPropertyDefinition property = properties.get(idx);
+
+      Setter<Object, Object> setter = createObjectSetter(property.getSetter().getAnnotated());
+      setter.set(child, idx);
+
+      Getter<Object, Object> getter = createObjectGetter(property.getGetter().getAnnotated());
+      Object value = getter.get(child);
+
+      assertThat(value).isEqualTo(idx);
+    }
   }
 }

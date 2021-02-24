@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.servicecomb</groupId>
     <artifactId>java-chassis-parent</artifactId>
-    <version>2.0.0-SNAPSHOT</version>
+    <version>2.2.0-SNAPSHOT</version>
     <relativePath>../parents/default</relativePath>
   </parent>
   <modelVersion>4.0.0</modelVersion>
@@ -32,8 +32,11 @@
   <name>ServiceComb::Client</name>
   <packaging>pom</packaging>
   <modules>
-    <module>kie-client</module>
+    <module>http-client-common</module>
     <module>service-center-client</module>
+    <module>config-common</module>
+    <module>config-kie-client</module>
+    <module>config-center-client</module>
   </modules>
 
 </project>

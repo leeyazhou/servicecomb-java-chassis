@@ -23,27 +23,23 @@ import static org.junit.Assert.assertThat;
 import static org.springframework.http.HttpStatus.OK;
 
 import java.util.Collection;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.http.ResponseEntity;
 
 public class ZipkinTracingIntegrationTest extends TracingTestBase {
-
   @Before
-  public void setUp() throws Exception {
+  public void setUp() {
     TracingTestMain.main(new String[0]);
   }
 
   @Test
-  public void sendsTracingToConfiguredAddress() throws InterruptedException, NoSuchMethodException {
+  public void sendsTracingToConfiguredAddress() throws NoSuchMethodException {
     ResponseEntity<String> entity = restTemplate.getForEntity("http://localhost:8080/hello", String.class);
 
     assertThat(entity.getStatusCode(), is(OK));
     assertThat(entity.getBody(), is("hello world, bonjour le monde, hi pojo"));
-
-    TimeUnit.MILLISECONDS.sleep(1000);
 
     Collection<String> tracingMessages = appender.pollLogs(".*\\[\\w+/\\w+/\\w*\\]\\s+INFO.*in /.*");
     assertThat(tracingMessages.size(), greaterThanOrEqualTo(2));

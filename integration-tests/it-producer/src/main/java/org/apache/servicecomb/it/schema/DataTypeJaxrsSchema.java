@@ -216,6 +216,12 @@ public class DataTypeJaxrsSchema {
     return color;
   }
 
+  @Path("dynamicEnum")
+  @POST
+  public DynamicColor dynamicEnum(DynamicColor color) {
+    return color;
+  }
+
   // query array
   @Path("queryArr")
   @GET
@@ -253,10 +259,16 @@ public class DataTypeJaxrsSchema {
     return Arrays.toString(queryArr) + queryArr.length;
   }
 
+  @Path("queryArrJSON")
+  @GET
+  public String queryArrJSON(@ApiParam(collectionFormat = "json") @QueryParam("queryArr") String[] queryArr) {
+    return Arrays.toString(queryArr) + queryArr.length;
+  }
+
   @Path("requestHeaders")
   @GET
-  public List<String> getRequestHeaders(@HeaderParam(value = "x-cse-test") String testServiceCombHeader,
-      @HeaderParam(value = "x-cse-test2") String testServiceCombHeader2, HttpServletRequest request) {
+  public List<String> getRequestHeaders(@HeaderParam(value = "x_cse_test") String testServiceCombHeader,
+      @HeaderParam(value = "x_cse_test2") String testServiceCombHeader2, HttpServletRequest request) {
     ArrayList<String> response = new ArrayList<>();
     Enumeration<String> requestHeaders = request.getHeaderNames();
     while (requestHeaders.hasMoreElements()) {

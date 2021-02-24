@@ -29,9 +29,12 @@ import org.apache.servicecomb.common.rest.RestConst;
 import org.apache.servicecomb.common.rest.RestProducerInvocation;
 import org.apache.servicecomb.common.rest.VertxRestInvocation;
 import org.apache.servicecomb.common.rest.filter.HttpServerFilter;
-import org.apache.servicecomb.core.CseContext;
+import org.apache.servicecomb.config.ConfigUtil;
+import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
 import org.apache.servicecomb.core.transport.TransportManager;
+import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletRequestEx;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletResponseEx;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
@@ -53,7 +56,6 @@ import io.vertx.core.http.Cookie;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
-import io.vertx.core.impl.VertxImpl;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.SocketAddress;
 import io.vertx.ext.web.Router;
@@ -79,6 +81,7 @@ public class TestVertxRestDispatcher {
 
   @Before
   public void setUp() {
+    ConfigUtil.installDynamicConfig();
     dispatcher = new VertxRestDispatcher();
     dispatcher.init(mainRouter);
 
@@ -95,12 +98,13 @@ public class TestVertxRestDispatcher {
       }
     };
 
-    CseContext.getInstance().setTransportManager(transportManager);
+    SCBBootstrap.createSCBEngineForTest().setTransportManager(transportManager);
   }
 
   @After
   public void teardown() {
-    CseContext.getInstance().setTransportManager(null);
+    SCBEngine.getInstance().destroy();
+    ArchaiusUtils.resetConfig();
   }
 
   @Test

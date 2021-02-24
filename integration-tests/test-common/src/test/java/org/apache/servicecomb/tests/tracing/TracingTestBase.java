@@ -18,7 +18,6 @@
 package org.apache.servicecomb.tests.tracing;
 
 import static org.apache.servicecomb.foundation.common.base.ServiceCombConstants.CONFIG_TRACING_COLLECTOR_ADDRESS;
-import static org.apache.servicecomb.serviceregistry.client.LocalServiceRegistryClientImpl.LOCAL_REGISTRY_FILE_KEY;
 import static org.hamcrest.collection.IsIterableContainingInAnyOrder.containsInAnyOrder;
 import static org.junit.Assert.assertThat;
 
@@ -52,13 +51,8 @@ public class TracingTestBase {
   @BeforeClass
   public static void setUpClass() throws Exception {
     System.setProperty(CONFIG_TRACING_COLLECTOR_ADDRESS, zipkin.httpUrl());
-    setUpLocalRegistry();
 
     Log4jConfig.addAppender(appender);
-  }
-
-  private static void setUpLocalRegistry() {
-    System.setProperty(LOCAL_REGISTRY_FILE_KEY, "notExistJustForceLocal");
   }
 
   protected void assertThatSpansReceivedByZipkin(Collection<String> logs, String... values) {
@@ -67,17 +61,21 @@ public class TracingTestBase {
         .map(this::extractIds)
         .collect(Collectors.toList());
 
-    // Sleep for 5 seconds to wait the reporter finish posting to zipkin server.
-    // See SCB-293
-    try {
-      Thread.sleep(5000);
-    } catch (InterruptedException e) {
-      log.error("Thread interrupted, ", e.getMessage());
-      Thread.currentThread().interrupt();
-    }
-
     List<Span> spans = zipkin.getTrace(traceId(loggedIds));
     List<String> tracedValues = tracedValues(spans);
+    int times = 100;
+    while (tracedValues.size() < values.length && times > 0) {
+      try {
+        Thread.sleep(10);
+        times--;
+        spans = zipkin.getTrace(traceId(loggedIds));
+        tracedValues = tracedValues(spans);
+      } catch (InterruptedException e) {
+        log.error("Thread interrupted, ", e.getMessage());
+        Thread.currentThread().interrupt();
+      }
+    }
+
     tracedValues.forEach(value -> log.info("Received value {}", value));
     log.info("values: " + String.join(",", values));
     assertThat(tracedValues, containsInAnyOrder(values));
@@ -91,7 +89,7 @@ public class TracingTestBase {
         .filter(span -> "call.path".equals(span.getKey()) || "http.path".equals(span.getKey())
             || "http.status_code".equals(span.getKey()))
         .filter(span -> span.getValue() != null)
-        .map(annotation -> new String(annotation.getValue()))
+        .map(annotation -> annotation.getValue())
         .distinct()
         .collect(Collectors.toList());
   }

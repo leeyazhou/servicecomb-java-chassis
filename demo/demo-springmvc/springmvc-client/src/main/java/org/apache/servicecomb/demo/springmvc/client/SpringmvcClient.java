@@ -17,22 +17,28 @@
 
 package org.apache.servicecomb.demo.springmvc.client;
 
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.http.HttpStatus;
-import org.apache.servicecomb.core.CseContext;
+import org.apache.servicecomb.demo.CategorizedTestCaseRunner;
 import org.apache.servicecomb.demo.DemoConst;
 import org.apache.servicecomb.demo.TestMgr;
 import org.apache.servicecomb.demo.controller.Controller;
 import org.apache.servicecomb.demo.controller.Person;
+import org.apache.servicecomb.demo.springmvc.client.ThirdSvc.ThirdSvcClient;
 import org.apache.servicecomb.foundation.common.utils.BeanUtils;
 import org.apache.servicecomb.foundation.common.utils.Log4jUtils;
+import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
+import org.apache.servicecomb.foundation.vertx.client.http.HttpClients;
 import org.apache.servicecomb.provider.springmvc.reference.CseRestTemplate;
 import org.apache.servicecomb.provider.springmvc.reference.RestTemplateBuilder;
 import org.apache.servicecomb.provider.springmvc.reference.UrlWithProviderPrefixClientHttpRequestFactory;
 import org.apache.servicecomb.provider.springmvc.reference.UrlWithServiceNameClientHttpRequestFactory;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -45,6 +51,8 @@ import org.springframework.web.client.RestTemplate;
 import com.netflix.config.DynamicPropertyFactory;
 
 public class SpringmvcClient {
+  private static final Logger LOGGER = LoggerFactory.getLogger(SpringmvcClient.class);
+
   private static RestTemplate templateUrlWithServiceName = new CseRestTemplate();
 
   private static RestTemplate templateUrlWithProviderPrefix = new CseRestTemplate();
@@ -59,17 +67,22 @@ public class SpringmvcClient {
       BeanUtils.init();
 
       run();
-
-      TestMgr.summary();
     } catch (Throwable e) {
       TestMgr.check("success", "failed");
-      System.err.println("-------------- test failed -------------");
-      e.printStackTrace();
-      System.err.println("-------------- test failed -------------");
+      LOGGER.error("-------------- test failed -------------");
+      LOGGER.error("", e);
+      LOGGER.error("-------------- test failed -------------");
     }
+    TestMgr.summary();
   }
 
-  public static void run() {
+  private static void changeTransport(String microserviceName, String transport) {
+    ArchaiusUtils.setProperty("servicecomb.references.transport." + microserviceName, transport);
+    TestMgr.setMsg(microserviceName, transport);
+  }
+
+  public static void run() throws Exception {
+    testHttpClientsIsOk();
     testConfigurationDuplicate();
 
     templateUrlWithServiceName.setRequestFactory(new UrlWithServiceNameClientHttpRequestFactory());
@@ -78,6 +91,7 @@ public class SpringmvcClient {
     controller = BeanUtils.getBean("controller");
 
     String prefix = "cse://springmvc";
+    String microserviceName = "springmvc";
 
     try {
       // this test class is intended for retry hanging issue JAV-127
@@ -92,18 +106,32 @@ public class SpringmvcClient {
     codeFirstClient.testCodeFirst(restTemplate, "springmvc", "/codeFirstSpringmvc/");
     codeFirstClient.testCodeFirst(templateUrlWithProviderPrefix, "springmvc", "/pojo/rest/codeFirstSpringmvc/");
 
-    String microserviceName = "springmvc";
-    for (String transport : DemoConst.transports) {
-      CseContext.getInstance().getConsumerProviderManager().setTransport(microserviceName, transport);
-      TestMgr.setMsg(microserviceName, transport);
+    testAllTransport(microserviceName);
+    testRestTransport(microserviceName, prefix);
+    CategorizedTestCaseRunner.runCategorizedTestCase(microserviceName);
+  }
 
-      testController(templateUrlWithServiceName, microserviceName);
+  private static void testHttpClientsIsOk() {
+    TestMgr.check(HttpClients.getClient("registry") != null, true);
+    TestMgr.check(HttpClients.getClient("registry-watch") != null, true);
+    TestMgr.check(HttpClients.getClient("config-center") != null, true);
+    TestMgr.check(HttpClients.getClient("http-transport-client") != null, true);
+    TestMgr.check(HttpClients.getClient("http2-transport-client") != null, true);
 
-      testController();
-      testRequiredBody(templateUrlWithServiceName, microserviceName);
-      testSpringMvcDefaultValues(templateUrlWithServiceName, microserviceName);
-      testSpringMvcDefaultValuesJavaPrimitive(templateUrlWithServiceName, microserviceName);
-    }
+    TestMgr.check(HttpClients.getClient("registry", false) != null, true);
+    TestMgr.check(HttpClients.getClient("registry-watch", false) != null, true);
+    TestMgr.check(HttpClients.getClient("config-center", false) != null, true);
+    TestMgr.check(HttpClients.getClient("http-transport-client", false) != null, true);
+    TestMgr.check(HttpClients.getClient("http2-transport-client", false) != null, true);
+  }
+
+  private static void testRestTransport(String microserviceName, String prefix) {
+    changeTransport(microserviceName, "rest");
+
+    testControllerRest(templateUrlWithServiceName, microserviceName);
+    testSpringMvcDefaultValuesRest(templateUrlWithServiceName, microserviceName);
+    testSpringMvcDefaultValuesJavaPrimitiveRest(templateUrlWithServiceName, microserviceName);
+
     HttpHeaders headers = new HttpHeaders();
     headers.set("Accept-Encoding", "gzip");
     HttpEntity<String> entity = new HttpEntity<>(headers);
@@ -131,13 +159,20 @@ public class SpringmvcClient {
       String content = restTemplate
           .getForObject("cse://springmvc/codeFirstSpringmvc/prometheusForTest", String.class);
 
-      TestMgr.check(true, content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.addDate"));
-      TestMgr.check(true, content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.sayHello"));
-      TestMgr.check(true, content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.fallbackFromCache"));
-      TestMgr.check(true, content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.isTrue"));
-      TestMgr.check(true, content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.add"));
-      TestMgr.check(true, content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.sayHi2"));
-      TestMgr.check(true, content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.saySomething"));
+      TestMgr.check(true,
+          content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.addDate"));
+      TestMgr.check(true,
+          content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.sayHello"));
+      TestMgr.check(true, content.contains(
+          "servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.fallbackFromCache"));
+      TestMgr.check(true,
+          content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.isTrue"));
+      TestMgr.check(true,
+          content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.add"));
+      TestMgr.check(true,
+          content.contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.sayHi2"));
+      TestMgr.check(true, content
+          .contains("servicecomb_invocation{appId=\"springmvctest\",operation=\"springmvc.codeFirst.saySomething"));
 
       String[] metricLines = content.split("\n");
       if (metricLines.length > 0) {
@@ -160,7 +195,73 @@ public class SpringmvcClient {
     }
   }
 
-  private static void testController(RestTemplate template, String microserviceName) {
+  private static void testAllTransport(String microserviceName) {
+    for (String transport : DemoConst.transports) {
+      changeTransport(microserviceName, transport);
+
+      TestMgr.setMsg(microserviceName, transport);
+
+      testControllerAllTransport(templateUrlWithServiceName, microserviceName);
+
+      testController();
+      testRequiredBody(templateUrlWithServiceName, microserviceName);
+      testSpringMvcDefaultValuesAllTransport(templateUrlWithServiceName, microserviceName);
+      testSpringMvcDefaultValuesJavaPrimitiveAllTransport(templateUrlWithServiceName, microserviceName);
+      testThirdService();
+    }
+  }
+
+  private static void testThirdService() {
+    ThirdSvcClient client = BeanUtils.getContext().getBean(ThirdSvcClient.class);
+
+    Date date = new Date();
+    ResponseEntity<Date> responseEntity = client.responseEntity(date);
+    TestMgr.check(date, responseEntity.getBody());
+  }
+
+  private static void testControllerRest(RestTemplate template, String microserviceName) {
+    String prefix = "cse://" + microserviceName;
+
+    TestMgr.check("hi world [world]",
+        template.getForObject(prefix + "/controller/sayhi?name=world",
+            String.class));
+
+    TestMgr.check("hi world1 [world1]",
+        template.getForObject(prefix + "/controller/sayhi?name={name}",
+            String.class,
+            "world1"));
+
+    TestMgr.check("hi world1+world2 [world1+world2]",
+        template.getForObject(prefix + "/controller/sayhi?name={name}",
+            String.class,
+            "world1+world2"));
+
+    TestMgr.check("hi hi 中国 [hi 中国]",
+        template.getForObject(prefix + "/controller/sayhi?name={name}",
+            String.class,
+            "hi 中国"));
+
+    Map<String, String> params = new HashMap<>();
+    params.put("name", "world2");
+    TestMgr.check("hi world2 [world2]",
+        template.getForObject(prefix + "/controller/sayhi?name={name}",
+            String.class,
+            params));
+
+    try {
+      template.postForObject(prefix + "/controller/sayhello/{name}",
+          null,
+          String.class,
+          "exception");
+      TestMgr.check(true, false);
+    } catch (InvocationException e) {
+      TestMgr.check(e.getStatusCode(), 503);
+    }
+
+    TestMgr.check("hi world [world]", controller.sayHi("world"));
+  }
+
+  private static void testControllerAllTransport(RestTemplate template, String microserviceName) {
     String prefix = "cse://" + microserviceName;
 
     TestMgr.check(7,
@@ -292,7 +393,59 @@ public class SpringmvcClient {
             "ha"));
   }
 
-  private static void testSpringMvcDefaultValues(RestTemplate template, String microserviceName) {
+  private static void testSpringMvcDefaultValuesRest(RestTemplate template, String microserviceName) {
+    String cseUrlPrefix = "cse://" + microserviceName + "/SpringMvcDefaultValues/";
+    String result = template.getForObject(cseUrlPrefix + "/query?d=10", String.class);
+    TestMgr.check("Hello 20bobo4010", result);
+    boolean failed = false;
+    result = null;
+    try {
+      result = template.getForObject(cseUrlPrefix + "/query2", String.class);
+    } catch (InvocationException e) {
+      failed = true;
+      TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
+    }
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
+
+    failed = false;
+    result = null;
+    try {
+      result = template.getForObject(cseUrlPrefix + "/query2?d=2&e=2", String.class);
+    } catch (InvocationException e) {
+      failed = true;
+      TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
+    }
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
+
+    failed = false;
+    result = null;
+    try {
+      result = template.getForObject(cseUrlPrefix + "/query2?a=&d=2&e=2", String.class);
+    } catch (InvocationException e) {
+      failed = true;
+      TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
+    }
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
+
+    result = template.getForObject(cseUrlPrefix + "/query2?d=30&e=2", String.class);
+    TestMgr.check("Hello 20bobo40302", result);
+
+    failed = false;
+    result = null;
+    try {
+      result = template.getForObject(cseUrlPrefix + "/query3?a=2&b=2", String.class);
+    } catch (InvocationException e) {
+      failed = true;
+      TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
+    }
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
+  }
+
+  private static void testSpringMvcDefaultValuesAllTransport(RestTemplate template, String microserviceName) {
     String cseUrlPrefix = "cse://" + microserviceName + "/SpringMvcDefaultValues/";
     //default values
     HttpHeaders headers = new HttpHeaders();
@@ -310,42 +463,51 @@ public class SpringmvcClient {
     result = template.getForObject(cseUrlPrefix + "/query?d=10", String.class);
     TestMgr.check("Hello 20bobo4010", result);
     boolean failed = false;
+    result = null;
     try {
       result = template.getForObject(cseUrlPrefix + "/query2", String.class);
     } catch (InvocationException e) {
       failed = true;
       TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
     }
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
 
     failed = false;
+    result = null;
     try {
       result = template.getForObject(cseUrlPrefix + "/query2?d=2&e=2", String.class);
     } catch (InvocationException e) {
       failed = true;
       TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
     }
-    TestMgr.check(failed, true);
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
 
     failed = false;
+    result = null;
     try {
       result = template.getForObject(cseUrlPrefix + "/query2?a=&d=2&e=2", String.class);
     } catch (InvocationException e) {
       failed = true;
       TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
     }
-    TestMgr.check(failed, true);
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
 
     result = template.getForObject(cseUrlPrefix + "/query2?d=30&e=2", String.class);
     TestMgr.check("Hello 20bobo40302", result);
 
     failed = false;
+    result = null;
     try {
       result = template.getForObject(cseUrlPrefix + "/query3?a=2&b=2", String.class);
     } catch (InvocationException e) {
       failed = true;
       TestMgr.check(e.getStatusCode(), HttpStatus.SC_BAD_REQUEST);
     }
-    TestMgr.check(failed, true);
+    TestMgr.check(true, failed);
+    TestMgr.check(null, result);
 
     result = template.getForObject(cseUrlPrefix + "/query3?a=30&b=2", String.class);
     TestMgr.check("Hello 302", result);
@@ -375,7 +537,8 @@ public class SpringmvcClient {
     TestMgr.check("Hello 345302", result);
   }
 
-  private static void testSpringMvcDefaultValuesJavaPrimitive(RestTemplate template, String microserviceName) {
+  private static void testSpringMvcDefaultValuesJavaPrimitiveAllTransport(RestTemplate template,
+      String microserviceName) {
     String cseUrlPrefix = "cse://" + microserviceName + "/SpringMvcDefaultValues/";
     //default values with primitive
     String result = template.postForObject(cseUrlPrefix + "/javaprimitiveint", null, String.class);
@@ -391,6 +554,30 @@ public class SpringmvcClient {
     TestMgr.check("Hello nullnull", result);
 
     result = template.postForObject(cseUrlPrefix + "/allprimitivetypes", null, String.class);
-    TestMgr.check("Hello false,0,0,0,0,0,0.0,0.0,null", result);
+    TestMgr.check("Hello false,\0,0,0,0,0,0.0,0.0,null", result);
+
+    result = template.postForObject(cseUrlPrefix
+            + "/allprimitivetypes?pBoolean=true&pChar=c&pByte=20&pShort=30&pInt=40&pLong=50&pFloat=60&pDouble=70&pDoubleWrap=80",
+        null, String.class);
+    TestMgr.check("Hello true,c,20,30,40,50,60.0,70.0,80.0", result);
+  }
+
+  private static void testSpringMvcDefaultValuesJavaPrimitiveRest(RestTemplate template, String microserviceName) {
+    String cseUrlPrefix = "cse://" + microserviceName + "/SpringMvcDefaultValues/";
+    //default values with primitive
+    String result = template.postForObject(cseUrlPrefix + "/javaprimitiveint", null, String.class);
+    TestMgr.check("Hello 0bobo", result);
+
+    result = template.postForObject(cseUrlPrefix + "/javaprimitivenumber", null, String.class);
+    TestMgr.check("Hello 0.0false", result);
+
+    result = template.postForObject(cseUrlPrefix + "/javaprimitivestr", null, String.class);
+    TestMgr.check("Hello", result);
+
+    result = template.postForObject(cseUrlPrefix + "/javaprimitivecomb", null, String.class);
+    TestMgr.check("Hello nullnull", result);
+
+    result = template.postForObject(cseUrlPrefix + "/allprimitivetypes", null, String.class);
+    TestMgr.check("Hello false,\0,0,0,0,0,0.0,0.0,null", result);
   }
 }

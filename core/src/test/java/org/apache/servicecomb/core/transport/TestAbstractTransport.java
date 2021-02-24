@@ -18,28 +18,35 @@
 package org.apache.servicecomb.core.transport;
 
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Method;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 
 import org.apache.servicecomb.core.Invocation;
-import org.apache.servicecomb.foundation.common.exceptions.ServiceCombException;
 import org.apache.servicecomb.foundation.common.net.IpPort;
 import org.apache.servicecomb.foundation.vertx.VertxUtils;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
-import org.apache.servicecomb.serviceregistry.registry.AbstractServiceRegistry;
+import org.apache.servicecomb.registry.RegistrationManager;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
-import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
+import org.springframework.util.ReflectionUtils;
+
+import com.netflix.config.DynamicProperty;
 
 import mockit.Expectations;
-import mockit.Injectable;
 import mockit.Mocked;
 
 public class TestAbstractTransport {
+  private Method updatePropertyMethod =
+      ReflectionUtils.findMethod(DynamicProperty.class, "updateProperty", String.class, Object.class);
+
+  private void updateProperty(String key, Object value) {
+    updatePropertyMethod.setAccessible(true);
+    ReflectionUtils.invokeMethod(updatePropertyMethod, null, key, value);
+  }
+
   class MyAbstractTransport extends AbstractTransport {
 
     @Override
@@ -57,19 +64,6 @@ public class TestAbstractTransport {
     }
   }
 
-  @Injectable
-  AbstractServiceRegistry serviceRegistry;
-
-  @Before
-  public void setup() {
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-  }
-
-  @After
-  public void teardown() {
-    RegistryUtils.setServiceRegistry(null);
-  }
-
   @AfterClass
   public static void classTeardown() {
     VertxUtils.blockCloseVertxByName("transport");
@@ -79,8 +73,7 @@ public class TestAbstractTransport {
   public void testSetListenAddressWithoutSchemaChineseSpaceNewSC() throws UnsupportedEncodingException {
     new Expectations() {
       {
-        serviceRegistry.getFeatures().isCanEncodeEndpoint();
-        result = true;
+        RegistrationManager.getPublishAddress("my", "127.0.0.1:9090");
       }
     };
 
@@ -88,22 +81,6 @@ public class TestAbstractTransport {
     transport.setListenAddressWithoutSchema("127.0.0.1:9090", Collections.singletonMap("country", "中 国"));
     Assert.assertEquals("my://127.0.0.1:9090?country=" + URLEncoder.encode("中 国", StandardCharsets.UTF_8.name()),
         transport.getEndpoint().getEndpoint());
-  }
-
-  @Test
-  public void testSetListenAddressWithoutSchemaChineseSpaceOldSC() {
-    MyAbstractTransport transport = new MyAbstractTransport();
-    try {
-      transport.setListenAddressWithoutSchema("127.0.0.1:9090", Collections.singletonMap("country", "中 国"));
-      Assert.fail("must throw exception");
-    } catch (ServiceCombException e) {
-      Assert.assertEquals(
-          "current service center not support encoded endpoint, please do not use chinese or space or anything need to be encoded.",
-          e.getMessage());
-      Assert.assertEquals(
-          "Illegal character in query at index 31: rest://127.0.0.1:9090?country=中 国",
-          e.getCause().getMessage());
-    }
   }
 
   @Test

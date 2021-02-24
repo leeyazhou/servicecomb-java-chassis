@@ -30,17 +30,17 @@ import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.QueryParam;
-import javax.xml.ws.Holder;
 
 import org.apache.servicecomb.core.Const;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.it.Consumers;
 import org.apache.servicecomb.it.extend.engine.ITSCBRestTemplate;
 import org.apache.servicecomb.provider.pojo.Invoker;
 import org.apache.servicecomb.provider.springmvc.reference.RestTemplateBuilder;
 import org.apache.servicecomb.provider.springmvc.reference.async.CseAsyncRestTemplate;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstance;
+import org.apache.servicecomb.registry.RegistrationManager;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstance;
 import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -69,20 +69,18 @@ public class Test3rdPartyInvocation {
   public static void beforeClass() {
     String endpoint =
         ((ITSCBRestTemplate) consumersJaxrs.getSCBRestTemplate()).getAddress(Const.RESTFUL);
-    RegistryUtils.getServiceRegistry()
-        .registerMicroserviceMappingByEndpoints(
-            THIRD_PARTY_MICROSERVICE_NAME, "1.2.1",
-            Collections.singletonList(endpoint),
-            DataTypeJaxrsSchemaIntf.class);
+    RegistrationManager.INSTANCE.registerMicroserviceMappingByEndpoints(
+        THIRD_PARTY_MICROSERVICE_NAME, "1.2.1",
+        Collections.singletonList(endpoint),
+        DataTypeJaxrsSchemaIntf.class);
 
     MicroserviceInstance instance = new MicroserviceInstance();
     instance.setEndpoints(Collections.singletonList(endpoint));
-    RegistryUtils.getServiceRegistry()
-        .registerMicroserviceMapping(
-            ASYNC_THIRD_PARTY_MICROSERVICE_NAME, "1.1.1",
-            Collections.singletonList(instance),
-            DataTypeJaxrsSchemaAsyncIntf.class
-        );
+    RegistrationManager.INSTANCE.registerMicroserviceMapping(
+        ASYNC_THIRD_PARTY_MICROSERVICE_NAME, "1.1.1",
+        Collections.singletonList(instance),
+        DataTypeJaxrsSchemaAsyncIntf.class
+    );
 
     dataTypeJaxrsSchema = Invoker.createProxy(
         THIRD_PARTY_MICROSERVICE_NAME, THIRD_PARTY_MICROSERVICE_NAME, DataTypeJaxrsSchemaIntf.class);
@@ -114,18 +112,18 @@ public class Test3rdPartyInvocation {
     String testParam2 = "test2";
     List<String> response = dataTypeJaxrsSchema.getRequestHeaders(testParam, testParam2);
     // user defined header, even though start with x-cse, will not be removed
-    Assert.assertThat(response, Matchers.contains("host", "x-cse-test", "x-cse-test2"));
+    Assert.assertThat(response, Matchers.contains("host", "x_cse_test", "x_cse_test2"));
 
     ArchaiusUtils.setProperty("servicecomb.request.clientRequestHeaderFilterEnabled", "false");
     response = dataTypeJaxrsSchema.getRequestHeaders(testParam, testParam2);
     Assert.assertThat(response,
-        Matchers.contains("host", "x-cse-context", "x-cse-target-microservice", "x-cse-test", "x-cse-test2"));
+        Matchers.contains("host", "x-cse-context", "x-cse-target-microservice", "x_cse_test", "x_cse_test2"));
 
     ArchaiusUtils.setProperty("servicecomb.request.clientRequestHeaderFilterEnabled", "true");
     ArchaiusUtils.setProperty("servicecomb.request.clientRequestHeaderFilterEnabled.3rdPartyDataTypeJaxrs", "false");
     response = dataTypeJaxrsSchema.getRequestHeaders(testParam, testParam2);
     Assert.assertThat(response,
-        Matchers.contains("host", "x-cse-context", "x-cse-target-microservice", "x-cse-test", "x-cse-test2"));
+        Matchers.contains("host", "x-cse-context", "x-cse-target-microservice", "x_cse_test", "x_cse_test2"));
 
     ArchaiusUtils.setProperty("servicecomb.request.clientRequestHeaderFilterEnabled.3rdPartyDataTypeJaxrs", "true");
   }
@@ -257,8 +255,8 @@ public class Test3rdPartyInvocation {
 
     @Path("requestHeaders")
     @GET
-    List<String> getRequestHeaders(@HeaderParam(value = "x-cse-test") String testServiceCombHeader,
-        @HeaderParam(value = "x-cse-test2") String testServiceCombHeader2);
+    List<String> getRequestHeaders(@HeaderParam(value = "x_cse_test") String testServiceCombHeader,
+        @HeaderParam(value = "x_cse_test2") String testServiceCombHeader2);
   }
 
   @Path("/v1/dataTypeJaxrs")

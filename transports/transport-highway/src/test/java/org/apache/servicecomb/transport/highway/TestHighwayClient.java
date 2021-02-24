@@ -18,39 +18,31 @@
 package org.apache.servicecomb.transport.highway;
 
 import javax.ws.rs.core.Response.Status;
-import javax.xml.ws.Holder;
 
 import org.apache.servicecomb.codec.protobuf.definition.OperationProtobuf;
 import org.apache.servicecomb.codec.protobuf.definition.ProtobufManager;
-import org.apache.servicecomb.core.Const;
 import org.apache.servicecomb.core.Endpoint;
 import org.apache.servicecomb.core.Invocation;
 import org.apache.servicecomb.core.definition.OperationConfig;
 import org.apache.servicecomb.core.definition.OperationMeta;
 import org.apache.servicecomb.core.executor.ReactiveExecutor;
 import org.apache.servicecomb.core.invocation.InvocationStageTrace;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.foundation.vertx.VertxUtils;
 import org.apache.servicecomb.foundation.vertx.client.ClientPoolManager;
 import org.apache.servicecomb.foundation.vertx.client.tcp.AbstractTcpClientPackage;
-import org.apache.servicecomb.foundation.vertx.client.tcp.NetClientWrapper;
 import org.apache.servicecomb.foundation.vertx.client.tcp.TcpClientConfig;
 import org.apache.servicecomb.foundation.vertx.client.tcp.TcpData;
 import org.apache.servicecomb.foundation.vertx.client.tcp.TcpResponseCallback;
-import org.apache.servicecomb.foundation.vertx.server.TcpParser;
-import org.apache.servicecomb.foundation.vertx.tcp.TcpOutputStream;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
-import org.apache.servicecomb.transport.highway.message.LoginRequest;
-import org.apache.servicecomb.transport.highway.message.RequestHeader;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import io.netty.buffer.ByteBuf;
-import io.protostuff.runtime.ProtobufCompatibleUtils;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Vertx;
@@ -138,7 +130,7 @@ public class TestHighwayClient {
 
     new MockUp<ProtobufManager>() {
       @Mock
-      public OperationProtobuf getOrCreateOperation(OperationMeta operationMeta) {
+      public OperationProtobuf getOrCreateOperation(Invocation operationMeta) {
         return operationProtobuf;
       }
     };
@@ -250,35 +242,5 @@ public class TestHighwayClient {
     Assert.assertEquals(nanoTime, invocationStageTrace.getStartClientFiltersRequest());
     Assert.assertEquals(nanoTime, invocationStageTrace.getStartClientFiltersResponse());
     Assert.assertEquals(nanoTime, invocationStageTrace.getFinishClientFiltersResponse());
-  }
-
-  @Test
-  public void testCreateLogin(@Mocked NetClientWrapper netClientWrapper) throws Exception {
-    ProtobufCompatibleUtils.init();
-
-    HighwayClientConnection connection =
-        new HighwayClientConnection(null, netClientWrapper, "highway://127.0.0.1:7890");
-    TcpOutputStream os = connection.createLogin();
-    ByteBuf buf = os.getBuffer().getByteBuf();
-
-    byte[] magic = new byte[TcpParser.TCP_MAGIC.length];
-    buf.readBytes(magic);
-    Assert.assertArrayEquals(TcpParser.TCP_MAGIC, magic);
-    Assert.assertEquals(os.getMsgId(), buf.readLong());
-
-    int start = TcpParser.TCP_HEADER_LENGTH;
-    int totalLen = buf.readInt();
-    int headerLen = buf.readInt();
-    Buffer headerBuffer =
-        os.getBuffer().slice(start, start + headerLen);
-    int end = start + totalLen;
-    start += headerLen;
-    Buffer bodyBuffer = os.getBuffer().slice(start, end);
-
-    RequestHeader header = RequestHeader.readObject(headerBuffer);
-    Assert.assertEquals(MsgType.LOGIN, header.getMsgType());
-
-    LoginRequest login = LoginRequest.readObject(bodyBuffer);
-    Assert.assertEquals(Const.HIGHWAY, login.getProtocol());
   }
 }

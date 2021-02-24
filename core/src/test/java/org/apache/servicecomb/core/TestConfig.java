@@ -19,7 +19,6 @@ package org.apache.servicecomb.core;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Properties;
 
 import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.Response.StatusType;
@@ -40,7 +39,7 @@ public class TestConfig {
     Assert.assertEquals("rest", Const.RESTFUL);
     Assert.assertEquals("", Const.ANY_TRANSPORT);
     Assert.assertEquals("latest", Const.VERSION_RULE_LATEST);
-    Assert.assertEquals("0.0.0+", Const.DEFAULT_VERSION_RULE);
+    Assert.assertEquals("0.0.0.0+", Const.DEFAULT_VERSION_RULE);
   }
 
   @Test
@@ -48,10 +47,10 @@ public class TestConfig {
     String objectString = new String("Unit Testing");
     Response oResponse = Response.success(objectString, Status.OK);
 
-    Assert.assertEquals(true, oResponse.isSuccessed());
+    Assert.assertEquals(true, oResponse.isSucceed());
 
     oResponse = Response.succResp(objectString);
-    Assert.assertEquals(true, oResponse.isSuccessed());
+    Assert.assertEquals(true, oResponse.isSucceed());
     Assert.assertEquals(200, oResponse.getStatusCode());
 
     Throwable oThrowable = new Throwable("Error");

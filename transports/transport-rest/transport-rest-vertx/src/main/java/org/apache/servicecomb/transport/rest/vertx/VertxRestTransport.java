@@ -29,11 +29,10 @@ import org.apache.servicecomb.transport.rest.client.RestTransportClient;
 import org.apache.servicecomb.transport.rest.client.RestTransportClientManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import io.vertx.core.DeploymentOptions;
+import io.vertx.core.VertxOptions;
 
-@Component
 public class VertxRestTransport extends AbstractTransport {
   private static final Logger LOGGER = LoggerFactory.getLogger(VertxRestTransport.class);
 
@@ -78,6 +77,8 @@ public class VertxRestTransport extends AbstractTransport {
     json.put(ENDPOINT_KEY, getEndpoint());
     json.put(RestTransportClient.class.getName(), restClient);
     options.setConfig(json);
+    options.setWorkerPoolName("pool-worker-transport-rest");
+    options.setWorkerPoolSize(VertxOptions.DEFAULT_WORKER_POOL_SIZE);
     return VertxUtils.blockDeploy(transportVertx, TransportConfig.getRestServerVerticle(), options);
   }
 

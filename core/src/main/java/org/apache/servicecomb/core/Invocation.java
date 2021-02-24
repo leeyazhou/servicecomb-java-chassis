@@ -17,30 +17,43 @@
 
 package org.apache.servicecomb.core;
 
+import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.servicecomb.core.definition.InvocationRuntimeType;
+import org.apache.servicecomb.core.definition.MicroserviceMeta;
 import org.apache.servicecomb.core.definition.OperationMeta;
 import org.apache.servicecomb.core.definition.SchemaMeta;
 import org.apache.servicecomb.core.event.InvocationBusinessMethodFinishEvent;
 import org.apache.servicecomb.core.event.InvocationBusinessMethodStartEvent;
+import org.apache.servicecomb.core.event.InvocationEncodeResponseStartEvent;
 import org.apache.servicecomb.core.event.InvocationFinishEvent;
+import org.apache.servicecomb.core.event.InvocationRunInExecutorFinishEvent;
+import org.apache.servicecomb.core.event.InvocationRunInExecutorStartEvent;
 import org.apache.servicecomb.core.event.InvocationStartEvent;
 import org.apache.servicecomb.core.invocation.InvocationStageTrace;
+import org.apache.servicecomb.core.provider.consumer.InvokerUtils;
 import org.apache.servicecomb.core.provider.consumer.ReferenceConfig;
-import org.apache.servicecomb.core.tracing.ScbMarker;
 import org.apache.servicecomb.core.tracing.TraceIdGenerator;
+import org.apache.servicecomb.core.tracing.TraceIdLogger;
 import org.apache.servicecomb.foundation.common.event.EventManager;
+import org.apache.servicecomb.foundation.common.utils.AsyncUtils;
 import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletRequestEx;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
 import org.apache.servicecomb.swagger.invocation.InvocationType;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.SwaggerInvocation;
+
+import com.fasterxml.jackson.databind.JavaType;
 
 public class Invocation extends SwaggerInvocation {
   private static final Collection<TraceIdGenerator> TRACE_ID_GENERATORS = loadTraceIdGenerators();
@@ -51,7 +64,9 @@ public class Invocation extends SwaggerInvocation {
     return SPIServiceUtils.getPriorityHighestServices(TraceIdGenerator::getName, TraceIdGenerator.class);
   }
 
-  private ReferenceConfig referenceConfig;
+  protected ReferenceConfig referenceConfig;
+
+  private InvocationRuntimeType invocationRuntimeType;
 
   // 本次调用对应的schemaMeta
   private SchemaMeta schemaMeta;
@@ -89,8 +104,20 @@ public class Invocation extends SwaggerInvocation {
 
   private long invocationId;
 
+  private TraceIdLogger traceIdLogger;
+
+  private Map<String, Object> invocationArguments = Collections.emptyMap();
+
+  private Object[] producerArguments;
+
+  private Map<String, Object> swaggerArguments = Collections.emptyMap();
+
   public long getInvocationId() {
     return invocationId;
+  }
+
+  public TraceIdLogger getTraceIdLogger() {
+    return this.traceIdLogger;
   }
 
   public HttpServletRequestEx getRequestEx() {
@@ -121,27 +148,33 @@ public class Invocation extends SwaggerInvocation {
 
   public Invocation() {
     // An empty invocation, used to mock or some other scenario do not need operation information.
+    traceIdLogger = new TraceIdLogger(this);
   }
 
-  public Invocation(ReferenceConfig referenceConfig, OperationMeta operationMeta, Object[] swaggerArguments) {
+  public Invocation(ReferenceConfig referenceConfig, OperationMeta operationMeta,
+      InvocationRuntimeType invocationRuntimeType,
+      Map<String, Object> swaggerArguments) {
     this.invocationType = InvocationType.CONSUMER;
     this.referenceConfig = referenceConfig;
+    this.invocationRuntimeType = invocationRuntimeType;
     init(operationMeta, swaggerArguments);
   }
 
-  public Invocation(Endpoint endpoint, OperationMeta operationMeta, Object[] swaggerArguments) {
+  public Invocation(Endpoint endpoint, OperationMeta operationMeta, Map<String, Object> swaggerArguments) {
     this.invocationType = InvocationType.PRODUCER;
+    this.invocationRuntimeType = operationMeta.buildBaseProviderRuntimeType();
     this.endpoint = endpoint;
     init(operationMeta, swaggerArguments);
   }
 
-  private void init(OperationMeta operationMeta, Object[] swaggerArguments) {
+  private void init(OperationMeta operationMeta, Map<String, Object> swaggerArguments) {
     this.invocationId = INVOCATION_ID.getAndIncrement();
     this.schemaMeta = operationMeta.getSchemaMeta();
     this.operationMeta = operationMeta;
-    this.swaggerArguments = swaggerArguments;
+    this.setSwaggerArguments(swaggerArguments);
     this.handlerList = getHandlerChain();
     handlerIndex = 0;
+    traceIdLogger = new TraceIdLogger(this);
   }
 
   public Transport getTransport() {
@@ -153,8 +186,7 @@ public class Invocation extends SwaggerInvocation {
   }
 
   public List<Handler> getHandlerChain() {
-    return (InvocationType.CONSUMER.equals(invocationType)) ? schemaMeta.getConsumerHandlerChain()
-        : schemaMeta.getProviderHandlerChain();
+    return schemaMeta.getMicroserviceMeta().getHandlerChain();
   }
 
   public Executor getResponseExecutor() {
@@ -173,8 +205,79 @@ public class Invocation extends SwaggerInvocation {
     return operationMeta;
   }
 
-  public Object[] getArgs() {
-    return swaggerArguments;
+  public Map<String, Object> getInvocationArguments() {
+    return this.invocationArguments;
+  }
+
+  public Map<String, Object> getSwaggerArguments() {
+    return this.swaggerArguments;
+  }
+
+  public Object getInvocationArgument(String name) {
+    return this.invocationArguments.get(name);
+  }
+
+  public Object getSwaggerArgument(String name) {
+    return this.swaggerArguments.get(name);
+  }
+
+  public void setInvocationArguments(Map<String, Object> invocationArguments) {
+    if (invocationArguments == null) {
+      // Empty arguments
+      this.invocationArguments = new HashMap<>(0);
+      return;
+    }
+    this.invocationArguments = invocationArguments;
+
+    buildSwaggerArguments();
+  }
+
+  private void buildSwaggerArguments() {
+    if (!this.invocationRuntimeType.isRawConsumer()) {
+      this.swaggerArguments = this.invocationRuntimeType.getArgumentsMapper()
+          .invocationArgumentToSwaggerArguments(this,
+              this.invocationArguments);
+    } else {
+      this.swaggerArguments = invocationArguments;
+    }
+  }
+
+  public void setSwaggerArguments(Map<String, Object> swaggerArguments) {
+    if (swaggerArguments == null) {
+      // Empty arguments
+      this.swaggerArguments = new HashMap<>(0);
+      return;
+    }
+    this.swaggerArguments = swaggerArguments;
+
+    buildInvocationArguments();
+  }
+
+  private void buildInvocationArguments() {
+    if (operationMeta.getSwaggerProducerOperation() != null && !isEdge()) {
+      this.invocationArguments = operationMeta.getSwaggerProducerOperation().getArgumentsMapper()
+          .swaggerArgumentToInvocationArguments(this,
+              swaggerArguments);
+    } else {
+      this.invocationArguments = swaggerArguments;
+    }
+  }
+
+  public Object[] toProducerArguments() {
+    if (producerArguments != null) {
+      return producerArguments;
+    }
+
+    Method method = operationMeta.getSwaggerProducerOperation().getProducerMethod();
+    Object[] args = new Object[method.getParameterCount()];
+    for (int i = 0; i < method.getParameterCount(); i++) {
+      args[i] = this.invocationArguments.get(method.getParameters()[i].getName());
+    }
+    return producerArguments = args;
+  }
+
+  public void clearProducerArguments() {
+    producerArguments = null;
   }
 
   public Endpoint getEndpoint() {
@@ -213,9 +316,6 @@ public class Invocation extends SwaggerInvocation {
   }
 
   public String getConfigTransportName() {
-    if (operationMeta.getTransport() != null) {
-      return operationMeta.getTransport();
-    }
     return referenceConfig.getTransport();
   }
 
@@ -231,10 +331,27 @@ public class Invocation extends SwaggerInvocation {
     return schemaMeta.getMicroserviceMeta().getAppId();
   }
 
+  public MicroserviceMeta getMicroserviceMeta() {
+    return schemaMeta.getMicroserviceMeta();
+  }
+
   public String getMicroserviceVersionRule() {
     return referenceConfig.getVersionRule();
   }
 
+  public InvocationRuntimeType getInvocationRuntimeType() {
+    return this.invocationRuntimeType;
+  }
+
+  public JavaType findResponseType(int statusCode) {
+    return this.invocationRuntimeType.findResponseType(statusCode);
+  }
+
+  public void setSuccessResponseType(JavaType javaType) {
+    this.invocationRuntimeType.setSuccessResponseType(javaType);
+  }
+
+  @Override
   public String getInvocationQualifiedName() {
     return invocationType.name() + " " + getRealTransportName() + " "
         + getOperationMeta().getMicroserviceQualifiedName();
@@ -248,8 +365,6 @@ public class Invocation extends SwaggerInvocation {
     for (TraceIdGenerator traceIdGenerator : TRACE_ID_GENERATORS) {
       initTraceId(traceIdGenerator);
     }
-
-    marker = new ScbMarker(this);
   }
 
   protected void initTraceId(TraceIdGenerator traceIdGenerator) {
@@ -283,11 +398,17 @@ public class Invocation extends SwaggerInvocation {
 
   public void onStart(HttpServletRequestEx requestEx, long start) {
     this.requestEx = requestEx;
+
     onStart(start);
   }
 
   public void onExecuteStart() {
     invocationStageTrace.startExecution();
+    EventManager.post(new InvocationRunInExecutorStartEvent(this));
+  }
+
+  public void onExecuteFinish() {
+    EventManager.post(new InvocationRunInExecutorFinishEvent(this));
   }
 
   @Override
@@ -299,6 +420,10 @@ public class Invocation extends SwaggerInvocation {
   @Override
   public void onBusinessMethodFinish() {
     EventManager.post(new InvocationBusinessMethodFinishEvent(this));
+  }
+
+  public void onEncodeResponseStart(Response response) {
+    EventManager.post(new InvocationEncodeResponseStartEvent(this, response));
   }
 
   @Override
@@ -343,5 +468,14 @@ public class Invocation extends SwaggerInvocation {
 
   public boolean isThirdPartyInvocation() {
     return referenceConfig.is3rdPartyService();
+  }
+
+  // ensure sync consumer invocation response flow not run in eventLoop
+  public <T> CompletableFuture<T> optimizeSyncConsumerThread(CompletableFuture<T> future) {
+    if (sync && !InvokerUtils.isInEventLoop()) {
+      AsyncUtils.waitQuietly(future);
+    }
+
+    return future;
   }
 }

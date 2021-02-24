@@ -21,7 +21,6 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 
@@ -31,13 +30,6 @@ import org.springframework.util.ReflectionUtils;
 import com.google.common.reflect.TypeToken;
 
 public final class ReflectUtils {
-  private static final Field MODIFIERS_FIELD =
-      ReflectionUtils.findField(Field.class, "modifiers");
-
-  static {
-    MODIFIERS_FIELD.setAccessible(true);
-  }
-
   private ReflectUtils() {
 
   }
@@ -49,9 +41,6 @@ public final class ReflectUtils {
   public static void setField(Class<?> cls, Object instance, String fieldName, Object value) {
     Field field = ReflectionUtils.findField(cls, fieldName);
     try {
-      if ((field.getModifiers() & Modifier.FINAL) != 0) {
-        MODIFIERS_FIELD.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-      }
       field.setAccessible(true);
       field.set(instance, value);
     } catch (Exception e) {
@@ -92,12 +81,16 @@ public final class ReflectUtils {
     return (T) Array.newInstance(cls, 0).getClass();
   }
 
-  public static Class<?> getClassByName(ClassLoader classLoader, String clsName) {
-    classLoader = JvmUtils.correctClassLoader(classLoader);
+  public static Class<?> getClassByName(String clsName) {
     try {
-      return classLoader.loadClass(clsName);
+      return Class.forName(clsName);
     } catch (ClassNotFoundException e) {
-      return null;
+      ClassLoader classLoader = JvmUtils.correctClassLoader(null);
+      try {
+        return classLoader.loadClass(clsName);
+      } catch (ClassNotFoundException e1) {
+        return null;
+      }
     }
   }
 }

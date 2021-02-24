@@ -34,6 +34,7 @@ import javax.ws.rs.core.MediaType;
 
 import org.apache.servicecomb.common.rest.codec.RestClientRequest;
 import org.apache.servicecomb.common.rest.codec.RestObjectMapperFactory;
+import org.apache.servicecomb.foundation.common.utils.PartUtils;
 import org.apache.servicecomb.foundation.vertx.stream.BufferOutputStream;
 import org.apache.servicecomb.foundation.vertx.stream.PumpFromPart;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
@@ -44,6 +45,7 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 
 import io.vertx.core.Context;
+import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientRequest;
@@ -66,10 +68,18 @@ public class RestClientRequestImpl implements RestClientRequest {
 
   protected Buffer bodyBuffer;
 
+  private Handler<Throwable> throwableHandler;
+
   public RestClientRequestImpl(HttpClientRequest request, Context context, AsyncResponse asyncResp) {
+    this(request, context, asyncResp, null);
+  }
+
+  public RestClientRequestImpl(HttpClientRequest request, Context context, AsyncResponse asyncResp,
+                               Handler<Throwable> throwableHandler) {
     this.context = context;
     this.asyncResp = asyncResp;
     this.request = request;
+    this.throwableHandler = throwableHandler;
   }
 
   @Override
@@ -90,13 +100,21 @@ public class RestClientRequestImpl implements RestClientRequest {
       LOGGER.debug("null file is ignored, file name = [{}]", name);
       return;
     }
+
+    if (partOrList.getClass().isArray()) {
+      for (Object part : (Object[]) partOrList) {
+        uploads.put(name, PartUtils.getSinglePart(name, part));
+      }
+    }
+
     if (List.class.isAssignableFrom(partOrList.getClass())) {
-      List<Part> parts = (List<Part>) partOrList;
-      uploads.putAll(name, parts);
+      for (Object part : (List<Object>) partOrList) {
+        uploads.put(name, PartUtils.getSinglePart(name, part));
+      }
       return;
     }
-    // must be part
-    uploads.put(name, (Part) partOrList);
+
+    uploads.put(name, PartUtils.getSinglePart(name, partOrList));
   }
 
   @Override
@@ -186,7 +204,7 @@ public class RestClientRequestImpl implements RestClientRequest {
     Buffer fileHeader = fileBoundaryInfo(boundary, name, part);
     request.write(fileHeader);
 
-    new PumpFromPart(context, part).toWriteStream(request).whenComplete((v, e) -> {
+    new PumpFromPart(context, part).toWriteStream(request, throwableHandler).whenComplete((v, e) -> {
       if (e != null) {
         LOGGER.debug("Failed to sending file [{}:{}].", name, filename, e);
         asyncResp.consumerFail(e);
@@ -257,6 +275,22 @@ public class RestClientRequestImpl implements RestClientRequest {
           .append("; ");
     }
     request.putHeader(HttpHeaders.COOKIE, builder.toString());
+  }
+
+  public Context getContext() {
+    return context;
+  }
+
+  public HttpClientRequest getRequest() {
+    return request;
+  }
+
+  public Map<String, String> getCookieMap() {
+    return cookieMap;
+  }
+
+  public Map<String, Object> getFormMap() {
+    return formMap;
   }
 
   @Override

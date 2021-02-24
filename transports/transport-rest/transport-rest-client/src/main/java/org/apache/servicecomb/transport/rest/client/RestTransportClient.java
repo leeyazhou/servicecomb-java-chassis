@@ -23,93 +23,28 @@ import org.apache.servicecomb.common.rest.filter.HttpClientFilter;
 import org.apache.servicecomb.core.Invocation;
 import org.apache.servicecomb.foundation.common.net.URIEndpointObject;
 import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
-import org.apache.servicecomb.foundation.vertx.VertxTLSBuilder;
-import org.apache.servicecomb.foundation.vertx.VertxUtils;
-import org.apache.servicecomb.foundation.vertx.client.ClientPoolManager;
-import org.apache.servicecomb.foundation.vertx.client.ClientVerticle;
-import org.apache.servicecomb.foundation.vertx.client.http.HttpClientPoolFactory;
 import org.apache.servicecomb.foundation.vertx.client.http.HttpClientWithContext;
+import org.apache.servicecomb.foundation.vertx.client.http.HttpClients;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
 import org.apache.servicecomb.transport.rest.client.http.RestClientInvocation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Vertx;
-import io.vertx.core.http.HttpClientOptions;
-import io.vertx.core.http.HttpVersion;
 
 public class RestTransportClient {
   private static final Logger LOGGER = LoggerFactory.getLogger(RestTransportClient.class);
 
-  private static final String SSL_KEY = "rest.consumer";
-
-  protected ClientPoolManager<HttpClientWithContext> clientMgr;
-
-  private ClientPoolManager<HttpClientWithContext> clientMgrHttp2;
-
   private List<HttpClientFilter> httpClientFilters;
-
-  public ClientPoolManager<HttpClientWithContext> getClientMgr() {
-    return clientMgr;
-  }
 
   public void init(Vertx vertx) throws Exception {
     httpClientFilters = SPIServiceUtils.getSortedService(HttpClientFilter.class);
-
-    HttpClientOptions httpClientOptions = createHttpClientOptions();
-    clientMgr = new ClientPoolManager<>(vertx, new HttpClientPoolFactory(httpClientOptions));
-
-    HttpClientOptions httpClientOptionshttp2 = createHttp2ClientOptions();
-
-    clientMgrHttp2 = new ClientPoolManager<>(vertx, new HttpClientPoolFactory(httpClientOptionshttp2));
-
-    DeploymentOptions deployOptions = VertxUtils.createClientDeployOptions(clientMgr,
-        TransportClientConfig.getThreadCount());
-    VertxUtils.blockDeploy(vertx, ClientVerticle.class, deployOptions);
-
-    DeploymentOptions deployOptionshttp2 = VertxUtils.createClientDeployOptions(clientMgrHttp2,
-        TransportClientConfig.getThreadCount());
-    VertxUtils.blockDeploy(vertx, ClientVerticle.class, deployOptionshttp2);
-  }
-
-  private static HttpClientOptions createHttpClientOptions() {
-    HttpClientOptions httpClientOptions = new HttpClientOptions();
-    httpClientOptions.setMaxPoolSize(TransportClientConfig.getConnectionMaxPoolSize())
-        .setIdleTimeout(TransportClientConfig.getConnectionIdleTimeoutInSeconds())
-        .setKeepAlive(TransportClientConfig.getConnectionKeepAlive())
-        .setTryUseCompression(TransportClientConfig.getConnectionCompression())
-        .setMaxHeaderSize(TransportClientConfig.getMaxHeaderSize())
-        .setMaxWaitQueueSize(TransportClientConfig.getMaxWaitQueueSize());
-
-    VertxTLSBuilder.buildHttpClientOptions(SSL_KEY, httpClientOptions);
-    return httpClientOptions;
-  }
-
-  private static HttpClientOptions createHttp2ClientOptions() {
-    HttpClientOptions httpClientOptions = new HttpClientOptions();
-    httpClientOptions.setUseAlpn(TransportClientConfig.getUseAlpn())
-        .setHttp2ClearTextUpgrade(false)
-        .setProtocolVersion(HttpVersion.HTTP_2)
-        .setIdleTimeout(TransportClientConfig.getHttp2ConnectionIdleTimeoutInSeconds())
-        .setHttp2MultiplexingLimit(TransportClientConfig.getHttp2MultiplexingLimit())
-        .setHttp2MaxPoolSize(TransportClientConfig.getHttp2ConnectionMaxPoolSize())
-        .setTryUseCompression(TransportClientConfig.getConnectionCompression())
-        .setMaxWaitQueueSize(TransportClientConfig.getMaxWaitQueueSize());
-
-    VertxTLSBuilder.buildHttpClientOptions(SSL_KEY, httpClientOptions);
-    return httpClientOptions;
   }
 
   public void send(Invocation invocation, AsyncResponse asyncResp) {
-    URIEndpointObject endpoint = (URIEndpointObject) invocation.getEndpoint().getAddress();
 
-    ClientPoolManager<HttpClientWithContext> currentClientMgr = clientMgr;
-    if (endpoint.isHttp2Enabled()) {
-      currentClientMgr = clientMgrHttp2;
-    }
+    HttpClientWithContext httpClientWithContext = findHttpClientPool(invocation);
 
-    HttpClientWithContext httpClientWithContext = findHttpClientPool(currentClientMgr, invocation);
     RestClientInvocation restClientInvocation = new RestClientInvocation(httpClientWithContext, httpClientFilters);
 
     try {
@@ -120,8 +55,15 @@ public class RestTransportClient {
     }
   }
 
-  protected HttpClientWithContext findHttpClientPool(ClientPoolManager<HttpClientWithContext> currentClientMgr,
-      Invocation invocation) {
-    return currentClientMgr.findClientPool(invocation.isSync());
+  protected HttpClientWithContext findHttpClientPool(Invocation invocation) {
+    URIEndpointObject endpoint = (URIEndpointObject) invocation.getEndpoint().getAddress();
+    HttpClientWithContext httpClientWithContext;
+    if (endpoint.isHttp2Enabled()) {
+      httpClientWithContext = HttpClients
+          .getClient(Http2TransportHttpClientOptionsSPI.CLIENT_NAME, invocation.isSync());
+    } else {
+      httpClientWithContext = HttpClients.getClient(HttpTransportHttpClientOptionsSPI.CLIENT_NAME, invocation.isSync());
+    }
+    return httpClientWithContext;
   }
 }

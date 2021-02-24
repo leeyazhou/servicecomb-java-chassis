@@ -19,121 +19,73 @@ package org.apache.servicecomb.service.center.client;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.http.HttpStatus;
 import org.apache.http.client.utils.URIBuilder;
+import org.apache.servicecomb.http.client.auth.RequestAuthHeaderProvider;
+import org.apache.servicecomb.http.client.common.HttpConfiguration.SSLProperties;
+import org.apache.servicecomb.http.client.common.HttpResponse;
+import org.apache.servicecomb.http.client.common.HttpTransport;
+import org.apache.servicecomb.http.client.common.HttpTransportFactory;
+import org.apache.servicecomb.http.client.common.HttpUtils;
 import org.apache.servicecomb.service.center.client.exception.OperationException;
-import org.apache.servicecomb.service.center.client.http.HttpResponse;
-import org.apache.servicecomb.service.center.client.http.HttpTransport;
-import org.apache.servicecomb.service.center.client.http.HttpTransportFactory;
-import org.apache.servicecomb.service.center.client.http.TLSConfig;
-import org.apache.servicecomb.service.center.client.http.TLSHttpsTransport;
+import org.apache.servicecomb.service.center.client.model.CreateMicroserviceInstanceRequest;
+import org.apache.servicecomb.service.center.client.model.CreateMicroserviceRequest;
+import org.apache.servicecomb.service.center.client.model.CreateSchemaRequest;
+import org.apache.servicecomb.service.center.client.model.FindMicroserviceInstancesResponse;
+import org.apache.servicecomb.service.center.client.model.GetSchemaListResponse;
+import org.apache.servicecomb.service.center.client.model.GetSchemaResponse;
 import org.apache.servicecomb.service.center.client.model.HeartbeatsRequest;
 import org.apache.servicecomb.service.center.client.model.Microservice;
 import org.apache.servicecomb.service.center.client.model.MicroserviceInstance;
+import org.apache.servicecomb.service.center.client.model.MicroserviceInstanceResponse;
 import org.apache.servicecomb.service.center.client.model.MicroserviceInstanceStatus;
 import org.apache.servicecomb.service.center.client.model.MicroserviceInstancesResponse;
+import org.apache.servicecomb.service.center.client.model.MicroserviceResponse;
 import org.apache.servicecomb.service.center.client.model.MicroservicesResponse;
+import org.apache.servicecomb.service.center.client.model.ModifySchemasRequest;
+import org.apache.servicecomb.service.center.client.model.RbacTokenRequest;
+import org.apache.servicecomb.service.center.client.model.RbacTokenResponse;
+import org.apache.servicecomb.service.center.client.model.RegisteredMicroserviceInstanceResponse;
+import org.apache.servicecomb.service.center.client.model.RegisteredMicroserviceResponse;
+import org.apache.servicecomb.service.center.client.model.SchemaInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-
-/**
- * Created by   on 2019/10/16.
- */
-public class ServiceCenterClient {
+public class ServiceCenterClient implements ServiceCenterOperation {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ServiceCenterClient.class);
 
   private ServiceCenterRawClient httpClient;
 
-  /**
-   * Use default config parameter
-   */
-  public ServiceCenterClient() {
-    this(new ServiceCenterRawClient());
+  public ServiceCenterClient(ServiceCenterRawClient httpClient) {
+    this.httpClient = httpClient;
   }
 
-  /**
-   * Add TLS config of client
-   * @param tlsConfig
-   */
-  public ServiceCenterClient(TLSConfig tlsConfig) {
-    this(tlsConfig, null);
-  }
-
-  /**
-   * Add extraGlobalHeaders to http request
-   * @param extraGlobalHeaders
-   */
-  public ServiceCenterClient(Map<String, String> extraGlobalHeaders) {
-    this(null, 0, null, null, null, extraGlobalHeaders);
-  }
-
-  /**
-   * Add TLS config and extraGlobalHeaders
-   * @param tlsConfig
-   * @param extraGlobalHeaders
-   */
-  public ServiceCenterClient(TLSConfig tlsConfig, Map<String, String> extraGlobalHeaders) {
-    this(null, 0, null, null, tlsConfig, extraGlobalHeaders);
-  }
-
-  /**
-   * Customized host,port,
-   * @param host
-   * @param port
-   */
-  public ServiceCenterClient(String host, int port) {
-    this(host, port, null, null, null, null);
-  }
-
-  /**
-   * Customized host, port, projectName, tenantName, TLSConf, headers and any one parameter can be null.
-   * @param host
-   * @param port
-   * @param projectName
-   * @param tenantName
-   * @param tlsConfig
-   * @param extraGlobalHeaders
-   */
-  public ServiceCenterClient(String host, int port, String projectName, String tenantName, TLSConfig tlsConfig,
+  public ServiceCenterClient(AddressManager addressManager,
+      SSLProperties sslProperties,
+      RequestAuthHeaderProvider requestAuthHeaderProvider,
+      String tenantName,
       Map<String, String> extraGlobalHeaders) {
-    HttpTransport httpTransport = HttpTransportFactory.getDefaultHttpTransport();
-    if (tlsConfig != null) {
-      httpTransport = new TLSHttpsTransport(tlsConfig);
-    }
+    HttpTransport httpTransport = HttpTransportFactory.createHttpTransport(sslProperties, requestAuthHeaderProvider);
     httpTransport.addHeaders(extraGlobalHeaders);
 
     this.httpClient = new ServiceCenterRawClient.Builder()
-        .setHost(host)
-        .setPort(port)
-        .setProjectName(projectName)
         .setTenantName(tenantName)
+        .setAddressManager(addressManager)
         .setHttpTransport(httpTransport).build();
   }
 
-  public ServiceCenterClient(ServiceCenterRawClient serviceCenterRawClient) {
-    this.httpClient = serviceCenterRawClient;
-  }
-
-  /**
-   * Get service-center instances message
-   *
-   * @return MicroserviceInstancesResponse
-   * @throws OperationException
-   */
+  @Override
   public MicroserviceInstancesResponse getServiceCenterInstances() {
     try {
       HttpResponse response = httpClient.getHttpRequest("/registry/health", null, null);
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        ObjectMapper mapper = new ObjectMapper();
-        return mapper.readValue(response.getContent(), MicroserviceInstancesResponse.class);
+        return HttpUtils.deserialize(response.getContent(), MicroserviceInstancesResponse.class);
       } else {
         throw new OperationException(
             "get service-center instances fails, statusCode = " + response.getStatusCode() + "; message = " + response
@@ -146,21 +98,15 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * Register microservice to service-center
-   *
-   * @param microservice
-   * @return serviceId
-   * @throws OperationException
-   */
-  public String registerMicroservice(Microservice microservice) {
+  @Override
+  public RegisteredMicroserviceResponse registerMicroservice(Microservice microservice) {
     try {
-      ObjectMapper mapper = new ObjectMapper();
-      mapper.configure(SerializationFeature.WRAP_ROOT_VALUE, true);
+      CreateMicroserviceRequest request = new CreateMicroserviceRequest();
+      request.setService(microservice);
       HttpResponse response = httpClient
-          .postHttpRequest("/registry/microservices", null, mapper.writeValueAsString(microservice));
+          .postHttpRequest("/registry/microservices", null, HttpUtils.serialize(request));
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        return response.getContent();
+        return HttpUtils.deserialize(response.getContent(), RegisteredMicroserviceResponse.class);
       } else {
         throw new OperationException(
             "register service fails, statusCode = " + response.getStatusCode() + "; message = " + response
@@ -173,19 +119,12 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * find all registerd microservice of service-center
-   *
-   * @return MicroserviceResponse
-   * @throws OperationException
-   */
+  @Override
   public MicroservicesResponse getMicroserviceList() {
     try {
       HttpResponse response = httpClient.getHttpRequest("/registry/microservices", null, null);
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        return mapper.readValue(response.getContent(), MicroservicesResponse.class);
+        return HttpUtils.deserialize(response.getContent(), MicroservicesResponse.class);
       } else {
         throw new OperationException(
             "get service List fails, statusCode = " + response.getStatusCode() + "; message = " + response
@@ -198,29 +137,24 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * query serviceId, temporary only supports Microservice type
-   *
-   * @param microservice
-   * @return serviceId
-   * @throws OperationException
-   */
-  public String queryServiceId(Microservice microservice) {
+  @Override
+  public RegisteredMicroserviceResponse queryServiceId(Microservice microservice) {
     try {
       URIBuilder uriBuilder = new URIBuilder("/registry/existence");
       uriBuilder.setParameter("type", "microservice");
       uriBuilder.setParameter("appId", microservice.getAppId());
       uriBuilder.setParameter("serviceName", microservice.getServiceName());
       uriBuilder.setParameter("version", microservice.getVersion());
+      uriBuilder.setParameter("env", microservice.getEnvironment());
 
       HttpResponse response = httpClient.getHttpRequest(uriBuilder.build().toString(), null, null);
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        return response.getContent();
+        return HttpUtils.deserialize(response.getContent(), RegisteredMicroserviceResponse.class);
       } else {
-        throw new OperationException(
-            "query serviceId fails, statusCode = " + response.getStatusCode() + "; message = " + response
-                .getMessage()
-                + "; content = " + response.getContent());
+        LOGGER.info("Query serviceId fails, statusCode = " + response.getStatusCode() + "; message = " + response
+            .getMessage()
+            + "; content = " + response.getContent());
+        return null;
       }
     } catch (IOException e) {
       throw new OperationException(
@@ -231,22 +165,14 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * Get one microservice message of service-center
-   *
-   * @param serviceId
-   * @return Microservice
-   * @throws OperationException
-   */
-  @SuppressWarnings("unchecked")
+  @Override
   public Microservice getMicroserviceByServiceId(String serviceId) {
     try {
       HttpResponse response = httpClient.getHttpRequest("/registry/microservices/" + serviceId, null, null);
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        JsonNode jsonNode = mapper.readTree(response.getContent());
-        return mapper.readValue(jsonNode.get("service").toString(), Microservice.class);
+        MicroserviceResponse microserviceResponse = HttpUtils
+            .deserialize(response.getContent(), MicroserviceResponse.class);
+        return microserviceResponse.getService();
       } else {
         throw new OperationException(
             "get service message fails, statusCode = " + response.getStatusCode() + "; message = " + response
@@ -259,22 +185,16 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * Register microservice instances to service-center
-   *
-   * @param instance
-   * @param serviceId
-   * @return instanceId
-   * @throws OperationException
-   */
-  public String registerMicroserviceInstance(MicroserviceInstance instance, String serviceId) {
+  @Override
+  public RegisteredMicroserviceInstanceResponse registerMicroserviceInstance(MicroserviceInstance instance) {
     try {
-      ObjectMapper mapper = new ObjectMapper();
-      mapper.configure(SerializationFeature.WRAP_ROOT_VALUE, true);
-      HttpResponse response = httpClient.postHttpRequest("/registry/microservices/" + serviceId + "/instances", null,
-          mapper.writeValueAsString(instance));
+      CreateMicroserviceInstanceRequest request = new CreateMicroserviceInstanceRequest();
+      request.setInstance(instance);
+      HttpResponse response = httpClient
+          .postHttpRequest("/registry/microservices/" + instance.getServiceId() + "/instances", null,
+              HttpUtils.serialize(request));
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        return response.getContent();
+        return HttpUtils.deserialize(response.getContent(), RegisteredMicroserviceInstanceResponse.class);
       } else {
         throw new OperationException(
             "register service instance fails, statusCode = " + response.getStatusCode() + "; message = " + response
@@ -287,20 +207,29 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * Find microservice instances of service-center
-   *
-   * @param serviceId
-   * @return MicroserviceInstancesResponse
-   * @throws OperationException
-   */
-  public MicroserviceInstancesResponse getMicroserviceInstanceList(String serviceId) {
+  @Override
+  public FindMicroserviceInstancesResponse findMicroserviceInstance(String consumerId, String appId, String serviceName,
+      String versionRule,
+      String revision) {
     try {
+      Map<String, String> headers = new HashMap<>();
+      headers.put("X-ConsumerId", consumerId);
       HttpResponse response = httpClient
-          .getHttpRequest("/registry/microservices/" + serviceId + "/instances", null, null);
+          .getHttpRequest("/registry/instances?appId=" + URLEncoder.encode(appId, "UTF-8")
+                  + "&serviceName=" + HttpUtils.encodeURLParam(serviceName)
+                  + "&version=" + HttpUtils.encodeURLParam(versionRule)
+                  + "&rev=" + HttpUtils.encodeURLParam(revision)
+              , headers, null);
+      FindMicroserviceInstancesResponse result = new FindMicroserviceInstancesResponse();
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        ObjectMapper mapper = new ObjectMapper();
-        return mapper.readValue(response.getContent(), MicroserviceInstancesResponse.class);
+        result.setModified(true);
+        result.setRevision(response.getHeader("X-Resource-Revision"));
+        result.setMicroserviceInstancesResponse(
+            HttpUtils.deserialize(response.getContent(), MicroserviceInstancesResponse.class));
+        return result;
+      } else if (response.getStatusCode() == HttpStatus.SC_NOT_MODIFIED) {
+        result.setModified(false);
+        return result;
       } else {
         throw new OperationException(
             "get service instances list fails, statusCode = " + response.getStatusCode() + "; message = " + response
@@ -313,23 +242,34 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * Get microservice instance message of service-center
-   *
-   * @param serviceId
-   * @param instanceId
-   * @return MicroserviceInstance
-   * @throws OperationException
-   */
-  @SuppressWarnings("unchecked")
+  @Override
+  public MicroserviceInstancesResponse getMicroserviceInstanceList(String serviceId) {
+    try {
+      HttpResponse response = httpClient
+          .getHttpRequest("/registry/microservices/" + serviceId + "/instances", null, null);
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        return HttpUtils.deserialize(response.getContent(), MicroserviceInstancesResponse.class);
+      } else {
+        throw new OperationException(
+            "get service instances list fails, statusCode = " + response.getStatusCode() + "; message = " + response
+                .getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "get service instances list fails", e);
+    }
+  }
+
+  @Override
   public MicroserviceInstance getMicroserviceInstance(String serviceId, String instanceId) {
     try {
       HttpResponse response = httpClient
           .getHttpRequest("/registry/microservices/" + serviceId + "/instances/" + instanceId, null, null);
       if (response.getStatusCode() == HttpStatus.SC_OK) {
-        ObjectMapper mapper = new ObjectMapper();
-        JsonNode jsonNode = mapper.readTree(response.getContent());
-        return mapper.readValue(jsonNode.get("instance").toString(), MicroserviceInstance.class);
+        MicroserviceInstanceResponse instanceResponse = HttpUtils
+            .deserialize(response.getContent(), MicroserviceInstanceResponse.class);
+        return instanceResponse.getInstance();
       } else {
         throw new OperationException(
             "get service instance message fails, statusCode = " + response.getStatusCode() + "; message = " + response
@@ -368,15 +308,7 @@ public class ServiceCenterClient {
     }
   }
 
-  /**
-   * Update status of microservice Instance
-   *
-   * @param serviceId
-   * @param instanceId
-   * @param status
-   * @return true
-   * @throws OperationException
-   */
+  @Override
   public boolean updateMicroserviceInstanceStatus(String serviceId, String instanceId,
       MicroserviceInstanceStatus status) {
     try {
@@ -406,9 +338,8 @@ public class ServiceCenterClient {
    */
   public void sendHeartBeats(HeartbeatsRequest heartbeatsRequest) {
     try {
-      ObjectMapper mapper = new ObjectMapper();
       HttpResponse response = httpClient
-          .putHttpRequest("/registry/heartbeats", null, mapper.writeValueAsString(heartbeatsRequest));
+          .putHttpRequest("/registry/heartbeats", null, HttpUtils.serialize(heartbeatsRequest));
 
       if (response.getStatusCode() == HttpStatus.SC_OK) {
         LOGGER.info("HEARTBEATS SUCCESS");
@@ -420,6 +351,171 @@ public class ServiceCenterClient {
     } catch (IOException e) {
       throw new OperationException(
           "heartbeats fails ", e);
+    }
+  }
+
+  @Override
+  public boolean sendHeartBeat(String serviceId, String instanceId) {
+    try {
+      HttpResponse response = httpClient
+          .putHttpRequest("/registry/microservices/" + serviceId + "/instances/" + instanceId + "/heartbeat",
+              null, null);
+
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        return true;
+      } else {
+        throw new OperationException(
+            "heartbeats fails, statusCode = " + response.getStatusCode() + "; message = " + response.getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "heartbeats fails ", e);
+    }
+  }
+
+  /**
+   * Get schemas list of service
+   *
+   * @param serviceId
+   * @return
+   * @throws OperationException
+   */
+  public List<SchemaInfo> getServiceSchemasList(String serviceId) {
+    try {
+      HttpResponse response = httpClient
+          .getHttpRequest("/registry/microservices/" + serviceId + "/schemas", null, null);
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        GetSchemaListResponse getSchemaResponse = HttpUtils
+            .deserialize(response.getContent(), GetSchemaListResponse.class);
+        return getSchemaResponse.getSchemas();
+      } else {
+        throw new OperationException(
+            "get service schemas list fails, statusCode = " + response.getStatusCode() + "; message = " + response
+                .getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "get service schemas list fails", e);
+    }
+  }
+
+  /**
+   * Get one schema context of service
+   *
+   * @param serviceId
+   * @param schemaId
+   * @return
+   * @throws OperationException
+   */
+  public String getServiceSchemaContext(String serviceId, String schemaId) {
+    try {
+      HttpResponse response = httpClient
+          .getHttpRequest("/registry/microservices/" + serviceId + "/schemas/" + schemaId, null, null);
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        GetSchemaResponse getSchemaResponse = HttpUtils.deserialize(response.getContent(), GetSchemaResponse.class);
+        return getSchemaResponse.getSchema();
+      } else {
+        throw new OperationException(
+            "get service schema context fails, statusCode = " + response.getStatusCode() + "; message = " + response
+                .getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "get service schemas context fails", e);
+    }
+  }
+
+  @Override
+  public boolean registerSchema(String serviceId, String schemaId, CreateSchemaRequest schema) {
+    try {
+      HttpResponse response = httpClient
+          .putHttpRequest("/registry/microservices/" + serviceId + "/schemas/" + schemaId, null,
+              HttpUtils.serialize(schema));
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        return true;
+      } else {
+        throw new OperationException(
+            "update service schema fails, statusCode = " + response.getStatusCode() + "; message = " + response
+                .getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "update service schema fails", e);
+    }
+  }
+
+  @Override
+  public boolean updateServiceSchemaContext(String serviceId, SchemaInfo schemaInfo) {
+    try {
+      CreateSchemaRequest request = new CreateSchemaRequest();
+      request.setSchema(schemaInfo.getSchema());
+      request.setSummary(schemaInfo.getSummary());
+      HttpResponse response = httpClient
+          .putHttpRequest("/registry/microservices/" + serviceId + "/schemas/" + schemaInfo.getSchemaId(), null,
+              HttpUtils.serialize(request));
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        return true;
+      } else {
+        throw new OperationException(
+            "update service schema fails, statusCode = " + response.getStatusCode() + "; message = " + response
+                .getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "update service schema fails", e);
+    }
+  }
+
+  @Override
+  public boolean batchUpdateServiceSchemaContext(String serviceId, ModifySchemasRequest modifySchemasRequest) {
+    try {
+      HttpResponse response = httpClient
+          .postHttpRequest("/registry/microservices/" + serviceId + "/schemas", null,
+              HttpUtils.serialize(modifySchemasRequest));
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        LOGGER.info("UPDATE SCHEMA OK");
+        return true;
+      } else {
+        throw new OperationException(
+            "update service schema fails, statusCode = " + response.getStatusCode() + "; message = " + response
+                .getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "update service schema fails", e);
+    }
+  }
+
+  @Override
+  public RbacTokenResponse queryToken(RbacTokenRequest request) {
+    try {
+      HttpResponse response = httpClient
+          .postHttpRequestAbsoluteUrl("/v4/token", null,
+              HttpUtils.serialize(request));
+      if (response.getStatusCode() == HttpStatus.SC_OK) {
+        RbacTokenResponse result = HttpUtils.deserialize(response.getContent(), RbacTokenResponse.class);
+        result.setStatusCode(HttpStatus.SC_OK);
+        return result;
+      } else if (response.getStatusCode() == HttpStatus.SC_NOT_FOUND ||
+          response.getStatusCode() == HttpStatus.SC_FORBIDDEN) {
+        RbacTokenResponse result = new RbacTokenResponse();
+        result.setStatusCode(response.getStatusCode());
+        return result;
+      } else {
+        throw new OperationException(
+            "query token failed, statusCode = " + response.getStatusCode() + "; message = " + response
+                .getMessage()
+                + "; content = " + response.getContent());
+      }
+    } catch (IOException e) {
+      throw new OperationException(
+          "query token failed", e);
     }
   }
 }

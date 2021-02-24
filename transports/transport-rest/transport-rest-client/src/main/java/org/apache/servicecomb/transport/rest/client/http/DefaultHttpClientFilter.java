@@ -34,10 +34,10 @@ import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.context.HttpStatus;
 import org.apache.servicecomb.swagger.invocation.exception.CommonExceptionData;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
-import org.apache.servicecomb.swagger.invocation.response.ResponseMeta;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JavaType;
 import com.netflix.config.DynamicPropertyFactory;
 
 public class DefaultHttpClientFilter implements HttpClientFilter {
@@ -83,7 +83,7 @@ public class DefaultHttpClientFilter implements HttpClientFilter {
     }
 
     OperationMeta operationMeta = invocation.getOperationMeta();
-    ResponseMeta responseMeta = operationMeta.findResponseMeta(responseEx.getStatus());
+    JavaType responseType = invocation.findResponseType(responseEx.getStatus());
     RestOperationMeta swaggerRestOperation = operationMeta.getExtData(RestConst.SWAGGER_REST_OPERATION);
     ProduceProcessor produceProcessor = findProduceProcessor(swaggerRestOperation, responseEx);
     if (produceProcessor == null) {
@@ -97,11 +97,11 @@ public class DefaultHttpClientFilter implements HttpClientFilter {
               responseEx.getStatusType().getReasonPhrase(),
               responseEx.getHeader(HttpHeaders.CONTENT_TYPE));
       LOGGER.warn(msg);
-      produceProcessor = ProduceProcessorManager.DEFAULT_PROCESSOR;
+      produceProcessor = ProduceProcessorManager.INSTANCE.findDefaultProcessor();
     }
 
     try {
-      result = produceProcessor.decodeResponse(responseEx.getBodyBuffer(), responseMeta.getJavaType());
+      result = produceProcessor.decodeResponse(responseEx.getBodyBuffer(), responseType);
       return Response.create(responseEx.getStatusType(), result);
     } catch (Exception e) {
       LOGGER.error("failed to decode response body, exception is [{}]", e.getMessage());
@@ -133,7 +133,7 @@ public class DefaultHttpClientFilter implements HttpClientFilter {
       }
       Collection<String> headerValues = responseEx.getHeaders(headerName);
       for (String headerValue : headerValues) {
-        response.getHeaders().addHeader(headerName, headerValue);
+        response.addHeader(headerName, headerValue);
       }
     }
 

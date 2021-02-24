@@ -21,13 +21,13 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.xml.ws.Holder;
-
-import org.apache.servicecomb.core.CseContext;
+import org.apache.servicecomb.config.ConfigUtil;
 import org.apache.servicecomb.core.Endpoint;
+import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
 import org.apache.servicecomb.core.transport.AbstractTransport;
-import org.apache.servicecomb.core.transport.TransportManager;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.common.net.URIEndpointObject;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.hamcrest.Matchers;
@@ -64,16 +64,19 @@ public class TestRestServerVerticle {
   @SuppressWarnings("deprecation")
   // TODO: vert.x 3.8.3 does not update startListen to promise, so we keep use deprecated API now. update in newer version.
   public void setUp() {
+    ConfigUtil.installDynamicConfig();
     instance = new RestServerVerticle();
     startFuture = Future.future();
 
-    CseContext.getInstance().setTransportManager(new TransportManager());
+    SCBBootstrap.createSCBEngineForTest();
   }
 
   @After
   public void tearDown() {
     instance = null;
     startFuture = null;
+    SCBEngine.getInstance().destroy();
+    ArchaiusUtils.resetConfig();
   }
 
   @Test

@@ -40,11 +40,10 @@ import org.apache.servicecomb.core.provider.consumer.SyncResponseExecutor;
 import org.apache.servicecomb.foundation.common.cache.VersionedCache;
 import org.apache.servicecomb.foundation.common.concurrent.ConcurrentHashMapEx;
 import org.apache.servicecomb.foundation.common.utils.ExceptionUtils;
-import org.apache.servicecomb.loadbalance.filter.IsolationDiscoveryFilter;
 import org.apache.servicecomb.loadbalance.filter.ServerDiscoveryFilter;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryContext;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryFilter;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryTree;
+import org.apache.servicecomb.registry.discovery.DiscoveryContext;
+import org.apache.servicecomb.registry.discovery.DiscoveryFilter;
+import org.apache.servicecomb.registry.discovery.DiscoveryTree;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.exception.ExceptionFactory;
@@ -71,7 +70,9 @@ public class LoadbalanceHandler implements Handler {
 
   public static final String SERVICECOMB_SERVER_ENDPOINT = "scb-endpoint";
 
-  public final boolean supportDefinedEndpoint =
+  // set endpoint in invocation.localContext
+  // ignore logic of loadBalance
+  public static final boolean supportDefinedEndpoint =
       DynamicPropertyFactory.getInstance()
           .getBooleanProperty("servicecomb.loadbalance.userDefinedEndpoint.enabled", false).get();
 
@@ -95,9 +96,10 @@ public class LoadbalanceHandler implements Handler {
 
     @Override
     public Server chooseServer(Object key) {
+      Invocation invocation = (Invocation) key;
       boolean isRetry = null != lastServer;
       for (int i = 0; i < COUNT; i++) {
-        Server s = delegate.chooseServer((Invocation) key);
+        Server s = delegate.chooseServer(invocation);
         if (s == null) {
           break;
         }
@@ -107,7 +109,7 @@ public class LoadbalanceHandler implements Handler {
         }
       }
       if (isRetry) {
-        LOGGER.info("retry to instance [{}]", lastServer.getHostPort());
+        invocation.getTraceIdLogger().info(LOGGER, "retry to instance [{}]", lastServer.getHostPort());
       }
 
       return lastServer;
@@ -193,15 +195,12 @@ public class LoadbalanceHandler implements Handler {
   public void handle(Invocation invocation, AsyncResponse asyncResp) throws Exception {
     AsyncResponse response = asyncResp;
     asyncResp = async -> {
-      if (Boolean.TRUE.equals(invocation.getLocalContext(IsolationDiscoveryFilter.TRYING_INSTANCES_EXISTING))) {
-        ServiceCombServerStats.releaseTryingChance();
-      }
+      ServiceCombServerStats.checkAndReleaseTryingChance(invocation);
       response.handle(async);
     };
-    if (supportDefinedEndpoint) {
-      if (defineEndpointAndHandle(invocation, asyncResp)) {
-        return;
-      }
+
+    if (handleSuppliedEndpoint(invocation, asyncResp)) {
+      return;
     }
 
     String strategy = Configuration.INSTANCE.getRuleStrategyName(invocation.getMicroserviceName());
@@ -222,11 +221,23 @@ public class LoadbalanceHandler implements Handler {
     }
   }
 
-  private boolean defineEndpointAndHandle(Invocation invocation, AsyncResponse asyncResp) throws Exception {
-    String endpointUri = invocation.getLocalContext(SERVICECOMB_SERVER_ENDPOINT);
-    if (endpointUri == null) {
-      return false;
+  // user's can invoke a service by supplying target Endpoint.
+  // in this case, we do not using load balancer, and no stats of server calculated, no retrying.
+  private boolean handleSuppliedEndpoint(Invocation invocation,
+      AsyncResponse asyncResp) throws Exception {
+    if (invocation.getEndpoint() != null) {
+      invocation.next(asyncResp);
+      return true;
     }
+
+    if (supportDefinedEndpoint) {
+      return defineEndpointAndHandle(invocation, asyncResp);
+    }
+
+    return false;
+  }
+
+  private Endpoint parseEndpoint(String endpointUri) throws Exception {
     URI formatUri = new URI(endpointUri);
     Transport transport = SCBEngine.getInstance().getTransportManager().findTransport(formatUri.getScheme());
     if (transport == null) {
@@ -234,8 +245,20 @@ public class LoadbalanceHandler implements Handler {
       throw new InvocationException(Status.BAD_REQUEST,
           "the endpoint's transport is not found.");
     }
-    Endpoint endpoint = new Endpoint(transport, endpointUri);
-    invocation.setEndpoint(endpoint);
+    return new Endpoint(transport, endpointUri);
+  }
+
+  private boolean defineEndpointAndHandle(Invocation invocation, AsyncResponse asyncResp) throws Exception {
+    Object endpoint = invocation.getLocalContext(SERVICECOMB_SERVER_ENDPOINT);
+    if (endpoint == null) {
+      return false;
+    }
+    if (endpoint instanceof String) {
+      // compatible to old usage
+      endpoint = parseEndpoint((String) endpoint);
+    }
+
+    invocation.setEndpoint((Endpoint) endpoint);
     invocation.next(resp -> {
       asyncResp.handle(resp);
     });
@@ -246,7 +269,7 @@ public class LoadbalanceHandler implements Handler {
     loadBalancerMap.clear();
   }
 
-  private void send(Invocation invocation, AsyncResponse asyncResp, final LoadBalancer chosenLB) throws Exception {
+  private void send(Invocation invocation, AsyncResponse asyncResp, LoadBalancer chosenLB) throws Exception {
     long time = System.currentTimeMillis();
     ServiceCombServer server = chosenLB.chooseServer(invocation);
     if (null == server) {
@@ -270,15 +293,15 @@ public class LoadbalanceHandler implements Handler {
   }
 
   private void sendWithRetry(Invocation invocation, AsyncResponse asyncResp,
-      final LoadBalancer chosenLB) throws Exception {
+      LoadBalancer chosenLB) throws Exception {
     long time = System.currentTimeMillis();
     // retry in loadbalance, 2.0 feature
-    final int currentHandler = invocation.getHandlerIndex();
+    int currentHandler = invocation.getHandlerIndex();
 
-    final SyncResponseExecutor orginExecutor;
-    final Executor newExecutor;
+    SyncResponseExecutor originalExecutor;
+    Executor newExecutor;
     if (invocation.getResponseExecutor() instanceof SyncResponseExecutor) {
-      orginExecutor = (SyncResponseExecutor) invocation.getResponseExecutor();
+      originalExecutor = (SyncResponseExecutor) invocation.getResponseExecutor();
       newExecutor = new Executor() {
         @Override
         public void execute(Runnable command) {
@@ -289,7 +312,7 @@ public class LoadbalanceHandler implements Handler {
       };
       invocation.setResponseExecutor(newExecutor);
     } else {
-      orginExecutor = null;
+      originalExecutor = null;
       newExecutor = null;
     }
 
@@ -306,24 +329,25 @@ public class LoadbalanceHandler implements Handler {
       @Override
       public void onExceptionWithServer(ExecutionContext<Invocation> context, Throwable exception,
           ExecutionInfo info) {
-        LOGGER.error("Invoke server failed. Operation {}; server {}; {}-{} msg {}",
-            context.getRequest().getInvocationQualifiedName(),
-            context.getRequest().getEndpoint(),
-            info.getNumberOfPastServersAttempted(),
-            info.getNumberOfPastAttemptsOnServer(),
-            ExceptionUtils.getExceptionMessageWithoutTrace(exception));
+        context.getRequest().getTraceIdLogger()
+            .error(LOGGER, "Invoke server failed. Operation {}; server {}; {}-{} msg {}",
+                context.getRequest().getInvocationQualifiedName(),
+                context.getRequest().getEndpoint(),
+                info.getNumberOfPastServersAttempted(),
+                info.getNumberOfPastAttemptsOnServer(),
+                ExceptionUtils.getExceptionMessageWithoutTrace(exception));
       }
 
       @Override
       public void onExecutionSuccess(ExecutionContext<Invocation> context, Response response,
           ExecutionInfo info) {
         if (info.getNumberOfPastServersAttempted() > 0 || info.getNumberOfPastAttemptsOnServer() > 0) {
-          LOGGER.error("Invoke server success. Operation {}; server {}",
+          context.getRequest().getTraceIdLogger().error(LOGGER, "Invoke server success. Operation {}; server {}",
               context.getRequest().getInvocationQualifiedName(),
               context.getRequest().getEndpoint());
         }
-        if (orginExecutor != null) {
-          orginExecutor.execute(() -> {
+        if (originalExecutor != null) {
+          originalExecutor.execute(() -> {
             asyncResp.complete(response);
           });
         } else {
@@ -334,11 +358,11 @@ public class LoadbalanceHandler implements Handler {
       @Override
       public void onExecutionFailed(ExecutionContext<Invocation> context, Throwable finalException,
           ExecutionInfo info) {
-        LOGGER.error("Invoke all server failed. Operation {}, e={}",
+        context.getRequest().getTraceIdLogger().error(LOGGER, "Invoke all server failed. Operation {}, e={}",
             context.getRequest().getInvocationQualifiedName(),
             ExceptionUtils.getExceptionMessageWithoutTrace(finalException));
-        if (orginExecutor != null) {
-          orginExecutor.execute(() -> {
+        if (originalExecutor != null) {
+          originalExecutor.execute(() -> {
             fail(finalException);
           });
         } else {
@@ -381,7 +405,7 @@ public class LoadbalanceHandler implements Handler {
             invocation.setEndpoint(server.getEndpoint());
             invocation.next(resp -> {
               if (isFailedResponse(resp)) {
-                LOGGER.error("service {}, call error, msg is {}, server is {} ",
+                invocation.getTraceIdLogger().error(LOGGER, "service {}, call error, msg is {}, server is {} ",
                     invocation.getInvocationQualifiedName(),
                     ExceptionUtils.getExceptionMessageWithoutTrace((Throwable) resp.getResult()),
                     s);
@@ -398,7 +422,8 @@ public class LoadbalanceHandler implements Handler {
               }
             });
           } catch (Exception e) {
-            LOGGER.error("execution error, msg is {}", ExceptionUtils.getExceptionMessageWithoutTrace(e));
+            invocation.getTraceIdLogger()
+                .error(LOGGER, "execution error, msg is {}", ExceptionUtils.getExceptionMessageWithoutTrace(e));
             f.onError(e);
           }
         });
@@ -416,7 +441,8 @@ public class LoadbalanceHandler implements Handler {
       if (InvocationException.class.isInstance(resp.getResult())) {
         InvocationException e = (InvocationException) resp.getResult();
         return e.getStatusCode() == ExceptionFactory.CONSUMER_INNER_STATUS_CODE
-            || e.getStatusCode() == 503;
+            || e.getStatusCode() == Status.SERVICE_UNAVAILABLE.getStatusCode()
+            || e.getStatusCode() == Status.REQUEST_TIMEOUT.getStatusCode();
       } else {
         return true;
       }

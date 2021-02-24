@@ -18,6 +18,7 @@ package org.apache.servicecomb.core.executor;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -30,8 +31,8 @@ public class ThreadPoolExecutorEx extends ThreadPoolExecutor {
   private AtomicInteger rejectedCount = new AtomicInteger();
 
   public ThreadPoolExecutorEx(int coreThreads, int maxThreads, int maxIdleInSecond, TimeUnit timeUnit,
-      BlockingQueue<Runnable> queue) {
-    super(coreThreads, maxThreads, maxIdleInSecond, timeUnit, queue);
+      BlockingQueue<Runnable> queue, ThreadFactory threadFactory) {
+    super(coreThreads, maxThreads, maxIdleInSecond, timeUnit, queue, threadFactory);
     if (queue instanceof LinkedBlockingQueueEx) {
       ((LinkedBlockingQueueEx) queue).setOwner(this);
     }
@@ -41,7 +42,18 @@ public class ThreadPoolExecutorEx extends ThreadPoolExecutor {
   @Override
   public void execute(Runnable command) {
     submittedCount.incrementAndGet();
-    super.execute(command);
+    try {
+      super.execute(command);
+    } catch (RejectedExecutionException e) {
+      if (getQueue() instanceof LinkedBlockingQueueEx) {
+        final LinkedBlockingQueueEx queue = (LinkedBlockingQueueEx) getQueue();
+        if (!queue.force(command)) {
+          throw new RejectedExecutionException("thread pool queue is full");
+        }
+      } else {
+        throw e;
+      }
+    }
   }
 
   public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {

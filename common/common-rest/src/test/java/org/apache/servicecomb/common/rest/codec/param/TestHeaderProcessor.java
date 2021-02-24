@@ -17,6 +17,7 @@
 
 package org.apache.servicecomb.common.rest.codec.param;
 
+import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
@@ -33,8 +34,12 @@ import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Test;
 
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.type.TypeFactory;
+import com.fasterxml.jackson.databind.util.StdDateFormat;
 
+import io.swagger.models.parameters.HeaderParameter;
+import io.swagger.models.properties.ArrayProperty;
 import mockit.Expectations;
 import mockit.Mock;
 import mockit.MockUp;
@@ -48,12 +53,22 @@ public class TestHeaderProcessor {
 
   RestClientRequest clientRequest;
 
-  private HeaderProcessor createProcessor(String name, Class<?> type) {
-    return new HeaderProcessor(name, TypeFactory.defaultInstance().constructType(type), null, true);
+  private HeaderProcessor createProcessor(String name, Type type) {
+    return createProcessor(name, type, null, true);
   }
 
-  private HeaderProcessor createProcessor(String name, Class<?> type, String defaultValue, boolean required) {
-    return new HeaderProcessor(name, TypeFactory.defaultInstance().constructType(type), defaultValue, required);
+  private HeaderProcessor createProcessor(String name, Type type, String defaultValue, boolean required) {
+    JavaType javaType = TypeFactory.defaultInstance().constructType(type);
+
+    HeaderParameter headerParameter = new HeaderParameter();
+    headerParameter.name(name)
+        .required(required)
+        .setDefaultValue(defaultValue);
+
+    if (javaType.isContainerType()) {
+      headerParameter.type(ArrayProperty.TYPE);
+    }
+    return new HeaderProcessor(headerParameter, javaType);
   }
 
   private void createClientRequest() {
@@ -78,7 +93,6 @@ public class TestHeaderProcessor {
     Object value = processor.getValue(request);
     Assert.assertEquals("h1v", value);
   }
-
 
   @SuppressWarnings("deprecation")
   @Test
@@ -167,9 +181,9 @@ public class TestHeaderProcessor {
       }
     };
 
-    HeaderProcessor processor =
-        new HeaderProcessor("h1", TypeFactory.defaultInstance().constructCollectionType(List.class, String.class),
-            null, true);
+    HeaderProcessor processor = createProcessor("h1",
+        TypeFactory.defaultInstance().constructCollectionType(List.class, String.class),
+        null, true);
     Object value = processor.getValue(request);
     Assert.assertThat((List<String>) value, Matchers.contains("h1v"));
   }
@@ -184,9 +198,9 @@ public class TestHeaderProcessor {
       }
     };
 
-    HeaderProcessor processor =
-        new HeaderProcessor("h1", TypeFactory.defaultInstance().constructCollectionType(Set.class, String.class), null,
-            true);
+    HeaderProcessor processor = createProcessor("h1",
+        TypeFactory.defaultInstance().constructCollectionType(Set.class, String.class),
+        null, true);
     Object value = processor.getValue(request);
     Assert.assertThat((Set<String>) value, Matchers.contains("h1v"));
   }
@@ -209,11 +223,21 @@ public class TestHeaderProcessor {
   }
 
   @Test
+  public void testSetValueDateFixed() throws Exception {
+    Date date = new Date(1586957400199L);
+    String strDate =  "2020-04-15T13:30:00.199+00:00";
+
+    createClientRequest();
+
+    HeaderProcessor processor = createProcessor("h1", Date.class);
+    processor.setValue(clientRequest, date);
+    Assert.assertEquals(strDate, headers.get("h1"));
+  }
+
+  @Test
   public void testSetValueDate() throws Exception {
     Date date = new Date();
-    @SuppressWarnings("deprecation")
-    String strDate = com.fasterxml.jackson.databind.util.ISO8601Utils.format(date, true);
-
+    String strDate =  new StdDateFormat().format(date);
     createClientRequest();
 
     HeaderProcessor processor = createProcessor("h1", Date.class);

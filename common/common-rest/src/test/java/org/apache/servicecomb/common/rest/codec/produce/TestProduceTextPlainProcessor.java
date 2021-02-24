@@ -17,6 +17,8 @@
 
 package org.apache.servicecomb.common.rest.codec.produce;
 
+import static org.apache.servicecomb.common.rest.codec.produce.ProduceProcessorManager.DEFAULT_SERIAL_CLASS;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -30,7 +32,7 @@ import com.fasterxml.jackson.databind.type.TypeFactory;
 import io.vertx.core.buffer.Buffer;
 
 public class TestProduceTextPlainProcessor {
-  ProduceProcessor pp = ProduceProcessorManager.PLAIN_PROCESSOR;
+  ProduceProcessor pp = ProduceProcessorManager.INSTANCE.findDefaultPlainProcessor();
 
   JavaType stringType = TypeFactory.defaultInstance().constructType(String.class);
 
@@ -79,5 +81,16 @@ public class TestProduceTextPlainProcessor {
 
     os.close();
     is.close();
+  }
+
+  @Test
+  public void testSetSerializationView() {
+    Assert.assertEquals(DEFAULT_SERIAL_CLASS, pp.getSerializationView());
+
+    pp.setSerializationView(null);
+    Assert.assertEquals(DEFAULT_SERIAL_CLASS, pp.getSerializationView());
+
+    pp.setSerializationView(Object.class);
+    Assert.assertEquals(DEFAULT_SERIAL_CLASS, pp.getSerializationView());
   }
 }

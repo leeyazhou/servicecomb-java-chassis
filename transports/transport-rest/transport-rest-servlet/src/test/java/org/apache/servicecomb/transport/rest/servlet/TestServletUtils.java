@@ -37,8 +37,9 @@ import javax.servlet.http.HttpServlet;
 
 import org.apache.servicecomb.common.rest.RestConst;
 import org.apache.servicecomb.foundation.common.exceptions.ServiceCombException;
+import org.apache.servicecomb.foundation.common.utils.ClassLoaderScopeContext;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
-import org.apache.servicecomb.serviceregistry.api.Const;
+import org.apache.servicecomb.registry.definition.DefinitionConst;
 import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
@@ -174,18 +175,18 @@ public class TestServletUtils {
 
   @Test
   public void testSaveUrlPrefixNull(@Mocked ServletContext servletContext) {
-    System.clearProperty(Const.URL_PREFIX);
+    ClassLoaderScopeContext.clearClassLoaderScopeProperty();
 
     ServletUtils.saveUrlPrefix(servletContext);
 
-    Assert.assertNull(System.getProperty(Const.URL_PREFIX));
-    System.clearProperty(Const.URL_PREFIX);
+    Assert.assertNull(ClassLoaderScopeContext.getClassLoaderScopeProperty(DefinitionConst.URL_PREFIX));
+    ClassLoaderScopeContext.clearClassLoaderScopeProperty();
   }
 
   @Test
   public void testSaveUrlPrefixNormal(@Mocked ServletContext servletContext,
       @Mocked ServletRegistration servletRegistration) {
-    System.clearProperty(Const.URL_PREFIX);
+    ClassLoaderScopeContext.clearClassLoaderScopeProperty();
     new Expectations() {
       {
         servletContext.getContextPath();
@@ -201,8 +202,9 @@ public class TestServletUtils {
 
     ServletUtils.saveUrlPrefix(servletContext);
 
-    Assert.assertThat(System.getProperty(Const.URL_PREFIX), Matchers.is("/root/rest"));
-    System.clearProperty(Const.URL_PREFIX);
+    Assert.assertThat(ClassLoaderScopeContext.getClassLoaderScopeProperty(DefinitionConst.URL_PREFIX),
+        Matchers.is("/root/rest"));
+    ClassLoaderScopeContext.clearClassLoaderScopeProperty();
   }
 
   @Test

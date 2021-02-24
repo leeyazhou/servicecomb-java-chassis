@@ -26,20 +26,20 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 import javax.ws.rs.core.Response.Status;
-import javax.xml.ws.Holder;
 
-import org.apache.servicecomb.core.CseContext;
+import org.apache.servicecomb.config.ConfigUtil;
 import org.apache.servicecomb.core.Invocation;
+import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
 import org.apache.servicecomb.core.transport.TransportManager;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
-import org.apache.servicecomb.serviceregistry.ServiceRegistry;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstance;
-import org.apache.servicecomb.serviceregistry.cache.CacheEndpoint;
-import org.apache.servicecomb.serviceregistry.cache.InstanceCacheManager;
-import org.apache.servicecomb.serviceregistry.discovery.DiscoveryFilter;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstance;
+import org.apache.servicecomb.registry.cache.CacheEndpoint;
+import org.apache.servicecomb.registry.cache.InstanceCacheManager;
+import org.apache.servicecomb.registry.discovery.DiscoveryFilter;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.hamcrest.Matchers;
@@ -49,9 +49,7 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-import org.mockito.Mockito;
 
-import com.netflix.loadbalancer.IRule;
 import com.netflix.loadbalancer.LoadBalancerStats;
 
 import mockit.Deencapsulation;
@@ -66,9 +64,15 @@ import mockit.Mocked;
  *
  */
 public class TestLoadbalanceHandler {
+  static SCBEngine scbEngine;
+
+  static InstanceCacheManager instanceCacheManager;
+
+  static TransportManager transportManager;
+
   String microserviceName = "ms";
 
-  IRule rule = Mockito.mock(IRule.class);
+//  IRule rule = Mockito.mock(IRule.class);
 
   LoadbalanceHandler handler;
 
@@ -78,26 +82,21 @@ public class TestLoadbalanceHandler {
   Invocation invocation;
 
   @Mocked
-  ServiceRegistry serviceRegistry;
-
-  @Mocked
-  InstanceCacheManager instanceCacheManager;
-
-  @Mocked
-  TransportManager transportManager;
-
-  @Mocked
   Transport restTransport;
 
   Response sendResponse;
 
-  List<String> results = new ArrayList<>();
+//  List<String> results = new ArrayList<>();
 
   @Rule
   public ExpectedException expectedException = ExpectedException.none();
 
   @Before
   public void setUp() {
+    ConfigUtil.installDynamicConfig();
+    scbEngine = SCBBootstrap.createSCBEngineForTest().run();
+    transportManager = scbEngine.getTransportManager();
+
     new MockUp<Invocation>(invocation) {
       @Mock
       String getMicroserviceName() {
@@ -110,19 +109,10 @@ public class TestLoadbalanceHandler {
       }
     };
 
-    CseContext.getInstance().setTransportManager(transportManager);
     new MockUp<TransportManager>(transportManager) {
       @Mock
       Transport findTransport(String transportName) {
         return restTransport;
-      }
-    };
-
-    RegistryUtils.setServiceRegistry(serviceRegistry);
-    new MockUp<ServiceRegistry>(serviceRegistry) {
-      @Mock
-      InstanceCacheManager getInstanceCacheManager() {
-        return instanceCacheManager;
       }
     };
 
@@ -146,8 +136,7 @@ public class TestLoadbalanceHandler {
 
   @After
   public void teardown() {
-    CseContext.getInstance().setTransportManager(null);
-    RegistryUtils.setServiceRegistry(null);
+    scbEngine.destroy();
     ArchaiusUtils.resetConfig();
   }
 
@@ -174,7 +163,7 @@ public class TestLoadbalanceHandler {
     MicroserviceInstance instance1 = new MicroserviceInstance();
     instance1.setInstanceId("1234");
     CacheEndpoint cacheEndpoint = new CacheEndpoint("rest://localhost:8080", instance1);
-    ServiceCombServer server = new ServiceCombServer(restTransport, cacheEndpoint);
+    ServiceCombServer server = new ServiceCombServer(null, restTransport, cacheEndpoint);
     LoadBalancerStats stats = new LoadBalancerStats("test");
     new Expectations(loadBalancer) {
       {
@@ -203,7 +192,7 @@ public class TestLoadbalanceHandler {
     MicroserviceInstance instance1 = new MicroserviceInstance();
     instance1.setInstanceId("1234");
     CacheEndpoint cacheEndpoint = new CacheEndpoint("rest://localhost:8080", instance1);
-    ServiceCombServer server = new ServiceCombServer(restTransport, cacheEndpoint);
+    ServiceCombServer server = new ServiceCombServer(null, restTransport, cacheEndpoint);
     LoadBalancerStats stats = new LoadBalancerStats("test");
     new Expectations(loadBalancer) {
       {
@@ -222,7 +211,8 @@ public class TestLoadbalanceHandler {
 
     Assert.assertEquals(1,
         loadBalancer.getLoadBalancerStats().getSingleServerStat(server).getSuccessiveConnectionFailureCount());
-    Assert.assertEquals("InvocationException: code=490;msg=CommonExceptionData [message=Cse Internal Bad Request]",
+    Assert.assertEquals(
+        "InvocationException: code=490;msg=CommonExceptionData [message=Unexpected consumer error, please check logs for details]",
         result.value.getMessage());
   }
 
@@ -231,7 +221,7 @@ public class TestLoadbalanceHandler {
     MicroserviceInstance instance1 = new MicroserviceInstance();
     instance1.setInstanceId("1234");
     CacheEndpoint cacheEndpoint = new CacheEndpoint("rest://localhost:8080", instance1);
-    ServiceCombServer server = new ServiceCombServer(restTransport, cacheEndpoint);
+    ServiceCombServer server = new ServiceCombServer(null, restTransport, cacheEndpoint);
     LoadBalancerStats stats = new LoadBalancerStats("test");
     new Expectations(loadBalancer) {
       {

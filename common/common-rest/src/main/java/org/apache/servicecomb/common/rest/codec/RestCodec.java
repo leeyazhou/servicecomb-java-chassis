@@ -17,7 +17,9 @@
 
 package org.apache.servicecomb.common.rest.codec;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.core.Response.Status;
@@ -37,46 +39,42 @@ public final class RestCodec {
   private RestCodec() {
   }
 
-  public static void argsToRest(Object[] args, RestOperationMeta restOperation,
+  public static void argsToRest(Map<String, Object> args, RestOperationMeta restOperation,
       RestClientRequest clientRequest) throws Exception {
     int paramSize = restOperation.getParamList().size();
     if (paramSize == 0) {
       return;
     }
 
-    if (paramSize != args.length) {
-      throw new Exception("wrong number of arguments");
-    }
-
     for (int idx = 0; idx < paramSize; idx++) {
       RestParam param = restOperation.getParamList().get(idx);
-      param.getParamProcessor().setValue(clientRequest, args[idx]);
+      param.getParamProcessor().setValue(clientRequest, args.get(param.getParamName()));
     }
   }
 
-  public static Object[] restToArgs(HttpServletRequest request,
+  public static Map<String, Object> restToArgs(HttpServletRequest request,
       RestOperationMeta restOperation) throws InvocationException {
     List<RestParam> paramList = restOperation.getParamList();
 
-    Object[] paramValues = new Object[paramList.size()];
+    Map<String, Object> paramValues = new HashMap<>();
     for (int idx = 0; idx < paramList.size(); idx++) {
       RestParam param = paramList.get(idx);
       try {
-        paramValues[idx] = param.getParamProcessor().getValue(request);
+        paramValues.put(param.getParamName(), param.getParamProcessor().getValue(request));
       } catch (Exception e) {
         // Avoid information leak of user input, and add option for debug use.
-        String message = String.format("Parameter is not valid for operation [%s]. Parameter is [%s]. Processor is [%s].",
-            restOperation.getOperationMeta().getMicroserviceQualifiedName(),
-            param.getParamName(),
-            param.getParamProcessor().getProcessorType());
+        String message = String
+            .format("Parameter is not valid for operation [%s]. Parameter is [%s]. Processor is [%s].",
+                restOperation.getOperationMeta().getMicroserviceQualifiedName(),
+                param.getParamName(),
+                param.getParamProcessor().getProcessorType());
         if (DynamicPropertyFactory.getInstance().getBooleanProperty(
             RestConst.PRINT_CODEC_ERROR_MESSGAGE, false).get()) {
           LOG.error(message, e);
-          throw new InvocationException(Status.BAD_REQUEST.getStatusCode(), "", message, e);
         } else {
           LOG.error("{} Add {}=true to print the details.", message, RestConst.PRINT_CODEC_ERROR_MESSGAGE);
-          throw new InvocationException(Status.BAD_REQUEST, message);
         }
+        throw new InvocationException(Status.BAD_REQUEST, message);
       }
     }
 

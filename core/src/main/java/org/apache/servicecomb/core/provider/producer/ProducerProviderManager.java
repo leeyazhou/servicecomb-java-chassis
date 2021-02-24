@@ -17,97 +17,117 @@
 
 package org.apache.servicecomb.core.provider.producer;
 
-import java.io.Closeable;
-import java.io.IOException;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
-import org.apache.servicecomb.core.BootListener;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.servicecomb.core.ProducerProvider;
 import org.apache.servicecomb.core.SCBEngine;
+import org.apache.servicecomb.core.definition.CoreMetaUtils;
 import org.apache.servicecomb.core.definition.MicroserviceMeta;
 import org.apache.servicecomb.core.definition.OperationMeta;
 import org.apache.servicecomb.core.definition.SchemaMeta;
-import org.apache.servicecomb.core.definition.SchemaUtils;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
-import org.apache.servicecomb.serviceregistry.api.registry.Microservice;
+import org.apache.servicecomb.core.executor.ExecutorManager;
+import org.apache.servicecomb.foundation.common.utils.ClassLoaderScopeContext;
+import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
+import org.apache.servicecomb.registry.definition.DefinitionConst;
+import org.apache.servicecomb.swagger.engine.SwaggerProducer;
+import org.apache.servicecomb.swagger.engine.SwaggerProducerOperation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
-import io.swagger.models.Scheme;
+import com.netflix.config.DynamicPropertyFactory;
+
 import io.swagger.models.Swagger;
 
-@Component
-public class ProducerProviderManager implements BootListener {
+public class ProducerProviderManager {
   private static final Logger LOGGER = LoggerFactory.getLogger(ProducerProviderManager.class);
 
-  @Autowired(required = false)
-  private List<ProducerProvider> producerProviderList = Collections.emptyList();
+  private List<ProducerProvider> producerProviderList = new ArrayList<>(
+      SPIServiceUtils.getOrLoadSortedService(ProducerProvider.class));
 
-  private MicroserviceMeta microserviceMeta;
+  private SCBEngine scbEngine;
 
-  public void init() throws Exception {
+  private List<ProducerMeta> producerMetas = new ArrayList<>();
+
+  public ProducerProviderManager(SCBEngine scbEngine) {
+    this.scbEngine = scbEngine;
+  }
+
+  public List<ProducerProvider> getProducerProviderList() {
+    return producerProviderList;
+  }
+
+  public void init() {
+    registerProducerMetas(producerMetas);
+
     for (ProducerProvider provider : producerProviderList) {
-      provider.init();
-    }
-  }
-
-  @Override
-  public void onBootEvent(BootEvent event) {
-    switch (event.getEventType()) {
-      case AFTER_TRANSPORT:
-        registerSchemaToMicroservice();
-        break;
-      case AFTER_CLOSE:
-        onClose();
-        break;
-    }
-  }
-
-  private void registerSchemaToMicroservice() {
-    Microservice microservice = RegistryUtils.getMicroservice();
-
-    String swaggerSchema = "http";
-    for (String endpoint : microservice.getInstance().getEndpoints()) {
-      if (endpoint.startsWith("rest://") && endpoint.indexOf("sslEnabled=true") > 0) {
-        swaggerSchema = "https";
-      }
-    }
-
-    microserviceMeta = SCBEngine.getInstance().getProducerMicroserviceMeta();
-    for (SchemaMeta schemaMeta : microserviceMeta.getSchemaMetas()) {
-      Swagger swagger = schemaMeta.getSwagger();
-      swagger.addScheme(Scheme.forValue(swaggerSchema));
-      String content = SchemaUtils.swaggerToString(swagger);
-      microservice.addSchema(schemaMeta.getSchemaId(), content);
-    }
-  }
-
-  private void onClose() {
-    if (microserviceMeta == null) {
-      return;
-    }
-    for (OperationMeta operationMeta : microserviceMeta.getOperations()) {
-      if (ExecutorService.class.isInstance(operationMeta.getExecutor())) {
-        ((ExecutorService) operationMeta.getExecutor()).shutdown();
+      List<ProducerMeta> producerMetas = provider.init();
+      if (producerMetas == null) {
+        LOGGER.warn("ProducerProvider {} not provide any producer.", provider.getClass().getName());
         continue;
       }
 
-      if (Closeable.class.isInstance(operationMeta.getExecutor())) {
-        Closeable executor = (Closeable) operationMeta.getExecutor();
-        try {
-          executor.close();
-        } catch (final IOException ioe) {
-          // ignore
-        }
-        continue;
-      }
+      registerProducerMetas(producerMetas);
+    }
+  }
 
-      LOGGER.warn("Executor {} do not support close or shutdown, it may block service shutdown.",
-          operationMeta.getExecutor().getClass().getName());
+  public void addProducerMeta(String schemaId, Object instance) {
+    addProducerMeta(new ProducerMeta(schemaId, instance));
+  }
+
+  public void addProducerMeta(ProducerMeta producerMeta) {
+    producerMetas.add(producerMeta);
+  }
+
+  private void registerProducerMetas(List<ProducerMeta> producerMetas) {
+    for (ProducerMeta producerMeta : producerMetas) {
+      registerSchema(producerMeta.getSchemaId(), producerMeta.getSchemaInterface(), producerMeta.getInstance());
+    }
+  }
+
+  public SchemaMeta registerSchema(String schemaId, Object instance) {
+    return registerSchema(schemaId, null, instance);
+  }
+
+  public SchemaMeta registerSchema(String schemaId, Class<?> schemaInterface, Object instance) {
+    MicroserviceMeta producerMicroserviceMeta = scbEngine.getProducerMicroserviceMeta();
+    Swagger swagger = scbEngine.getSwaggerLoader().loadLocalSwagger(
+        producerMicroserviceMeta.getAppId(),
+        producerMicroserviceMeta.getShortName(),
+        schemaId);
+    SwaggerProducer swaggerProducer = scbEngine.getSwaggerEnvironment()
+        .createProducer(instance, schemaInterface, swagger);
+    swagger = swaggerProducer.getSwagger();
+    registerUrlPrefixToSwagger(swagger);
+
+    SchemaMeta schemaMeta = producerMicroserviceMeta.registerSchemaMeta(schemaId, swagger);
+    schemaMeta.putExtData(CoreMetaUtils.SWAGGER_PRODUCER, swaggerProducer);
+    Executor reactiveExecutor = scbEngine.getExecutorManager().findExecutorById(ExecutorManager.EXECUTOR_REACTIVE);
+    for (SwaggerProducerOperation producerOperation : swaggerProducer.getAllOperations()) {
+      OperationMeta operationMeta = schemaMeta.ensureFindOperation(producerOperation.getOperationId());
+      operationMeta.setSwaggerProducerOperation(producerOperation);
+
+      if (CompletableFuture.class.equals(producerOperation.getProducerMethod().getReturnType())) {
+        operationMeta.setExecutor(scbEngine.getExecutorManager().findExecutor(operationMeta, reactiveExecutor));
+      }
+    }
+
+    return schemaMeta;
+  }
+
+  // This is special requirement by users: When service deployed in tomcat,user want to use RestTemplate to
+  // call REST service by the full url. e.g. restTemplate.getForObejct("cse://serviceName/root/prefix/health")
+  // By default, user's do not need context prefix, e.g. restTemplate.getForObejct("cse://serviceName/health")
+  private void registerUrlPrefixToSwagger(Swagger swagger) {
+    String urlPrefix = ClassLoaderScopeContext.getClassLoaderScopeProperty(DefinitionConst.URL_PREFIX);
+    if (!StringUtils.isEmpty(urlPrefix) && !swagger.getBasePath().startsWith(urlPrefix)
+        && DynamicPropertyFactory.getInstance()
+        .getBooleanProperty(DefinitionConst.REGISTER_URL_PREFIX, false).get()) {
+      LOGGER.info("Add swagger base path prefix for {} with {}", swagger.getBasePath(), urlPrefix);
+      swagger.setBasePath(urlPrefix + swagger.getBasePath());
     }
   }
 }

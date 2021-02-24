@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import javax.annotation.Nonnull;
+
 import org.apache.servicecomb.common.rest.codec.param.QueryProcessorCreator;
 import org.apache.servicecomb.common.rest.definition.RestParam;
 
@@ -42,7 +44,6 @@ public class URLPathBuilder {
 
   private void initQueryWriterList(Map<String, RestParam> paramMap) {
     for (RestParam param : paramMap.values()) {
-
       if (!QueryProcessorCreator.PARAMTYPE.equals(param.getParamProcessor().getProcessorType())) {
         continue;
       }
@@ -91,7 +92,7 @@ public class URLPathBuilder {
     }
   }
 
-  public String createRequestPath(Object[] args) throws Exception {
+  public String createRequestPath(Map<String, Object> args) throws Exception {
     URLPathStringBuilder builder = new URLPathStringBuilder();
 
     genPathString(builder, args);
@@ -100,19 +101,19 @@ public class URLPathBuilder {
     return builder.build();
   }
 
-  public String createPathString(Object[] args) throws Exception {
+  public String createPathString(Map<String, Object> args) throws Exception {
     URLPathStringBuilder builder = new URLPathStringBuilder();
     genPathString(builder, args);
     return builder.build();
   }
 
-  private void genPathString(URLPathStringBuilder builder, Object[] args) throws Exception {
+  private void genPathString(URLPathStringBuilder builder, Map<String, Object> args) throws Exception {
     for (UrlParamWriter writer : this.pathParamWriterList) {
       writer.write(builder, args);
     }
   }
 
-  private void genQueryString(URLPathStringBuilder builder, Object[] args) throws Exception {
+  private void genQueryString(URLPathStringBuilder builder, Map<String, Object> args) throws Exception {
     for (UrlParamWriter writer : queryParamWriterList) {
       writer.write(builder, args);
     }
@@ -128,7 +129,7 @@ public class URLPathBuilder {
       return this;
     }
 
-    public URLPathStringBuilder appendQuery(String key, String value) {
+    public URLPathStringBuilder appendQuery(@Nonnull String name, @Nonnull String encodedValue) {
       if (queryPrefixNotWrite) {
         stringBuilder.append('?');
         queryPrefixNotWrite = false;
@@ -136,7 +137,7 @@ public class URLPathBuilder {
         stringBuilder.append('&');
       }
 
-      stringBuilder.append(key).append("=").append(value);
+      stringBuilder.append(name).append("=").append(encodedValue);
       return this;
     }
 

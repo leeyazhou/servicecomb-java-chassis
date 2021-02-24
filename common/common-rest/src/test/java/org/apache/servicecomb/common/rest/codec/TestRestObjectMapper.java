@@ -17,14 +17,19 @@
 
 package org.apache.servicecomb.common.rest.codec;
 
+import static org.junit.Assert.assertFalse;
+
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.util.Date;
 
+import org.apache.servicecomb.foundation.common.utils.RestObjectMapper;
 import org.junit.Assert;
 import org.junit.Test;
 
 import com.fasterxml.jackson.core.JsonParser.Feature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.databind.type.TypeFactory;
 
@@ -33,14 +38,32 @@ import io.vertx.core.json.JsonObject;
 public class TestRestObjectMapper {
 
   @Test
+  public void testFormateDate() throws Exception {
+    RestObjectMapper mapper = new RestObjectMapper();
+    // must read/write ISO 8061 dates
+    Date date = mapper.readValue("\"2017-07-21T17:32:28Z\"".getBytes(), Date.class);
+    String dateStr = mapper.writeValueAsString(date);
+    Assert.assertEquals(dateStr, "\"2017-07-21T17:32:28.000+00:00\"");
+
+    date = mapper.readValue("\"2017-07-21T17:32:28.320+0100\"".getBytes(), Date.class);
+    dateStr = mapper.writeValueAsString(date);
+    Assert.assertEquals(dateStr, "\"2017-07-21T16:32:28.320+00:00\""); // one hour later
+  }
+
+  @Test
   public void testAutoCloseSource() {
-    Assert.assertFalse(RestObjectMapperFactory.getRestObjectMapper().getFactory().isEnabled(Feature.AUTO_CLOSE_SOURCE));
+    assertFalse(RestObjectMapperFactory.getRestObjectMapper().getFactory().isEnabled(Feature.AUTO_CLOSE_SOURCE));
   }
 
   @Test
   public void testDeserializationFeature() {
-    Assert.assertFalse(
+    assertFalse(
         RestObjectMapperFactory.getRestObjectMapper().isEnabled(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES));
+  }
+
+  @Test
+  public void testDefaultViewInclusionFeature() {
+    assertFalse(RestObjectMapperFactory.getRestObjectMapper().isEnabled(MapperFeature.DEFAULT_VIEW_INCLUSION));
   }
 
   @Test

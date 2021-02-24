@@ -21,14 +21,20 @@ import java.nio.channels.ClosedChannelException;
 import java.util.List;
 import java.util.Set;
 
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 
+import org.apache.servicecomb.common.accessLog.AccessLogConfig;
+import org.apache.servicecomb.common.accessLog.core.element.impl.LocalHostAccessItem;
 import org.apache.servicecomb.common.rest.codec.RestObjectMapperFactory;
 import org.apache.servicecomb.core.Endpoint;
+import org.apache.servicecomb.core.event.ServerAccessLogEvent;
 import org.apache.servicecomb.core.transport.AbstractTransport;
+import org.apache.servicecomb.foundation.common.event.EventManager;
 import org.apache.servicecomb.foundation.common.net.URIEndpointObject;
 import org.apache.servicecomb.foundation.common.utils.ExceptionUtils;
 import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
+
 import org.apache.servicecomb.foundation.ssl.SSLCustom;
 import org.apache.servicecomb.foundation.ssl.SSLOption;
 import org.apache.servicecomb.foundation.ssl.SSLOptionFactory;
@@ -37,11 +43,8 @@ import org.apache.servicecomb.foundation.vertx.metrics.DefaultHttpServerMetrics;
 import org.apache.servicecomb.foundation.vertx.metrics.metric.DefaultServerEndpointMetric;
 import org.apache.servicecomb.swagger.invocation.exception.CommonExceptionData;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
-import org.apache.servicecomb.transport.rest.vertx.accesslog.AccessLogConfiguration;
-import org.apache.servicecomb.transport.rest.vertx.accesslog.impl.AccessLogHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
 
 import com.netflix.config.DynamicPropertyFactory;
 
@@ -106,6 +109,8 @@ public class RestServerVerticle extends AbstractVerticle {
           endpointMetric.onRejectByConnectionLimit();
         }
       });
+      List<HttpServerExceptionHandler> httpServerExceptionHandlers =
+          SPIServiceUtils.getAllService(HttpServerExceptionHandler.class);
       httpServer.exceptionHandler(e -> {
         if (e instanceof ClosedChannelException) {
           // This is quite normal in between browser and ege, so do not print out.
@@ -113,6 +118,9 @@ public class RestServerVerticle extends AbstractVerticle {
         } else {
           LOGGER.error("Unexpected error in server.{}", ExceptionUtils.getExceptionMessageWithoutTrace(e));
         }
+        httpServerExceptionHandlers.forEach(httpServerExceptionHandler -> {
+          httpServerExceptionHandler.handle(e);
+        });
       });
       startListen(httpServer, startFuture);
     } catch (Throwable e) {
@@ -161,14 +169,19 @@ public class RestServerVerticle extends AbstractVerticle {
   }
 
   private void mountAccessLogHandler(Router mainRouter) {
-    if (AccessLogConfiguration.INSTANCE.getAccessLogEnabled()) {
-      String pattern = AccessLogConfiguration.INSTANCE.getAccesslogPattern();
-      LOGGER.info("access log enabled, pattern = {}", pattern);
-      mainRouter.route()
-          .handler(new AccessLogHandler(
-              pattern
-          ));
+    if (!AccessLogConfig.INSTANCE.isServerLogEnabled()) {
+      return;
     }
+    LOGGER.info("access log enabled, pattern = {}", AccessLogConfig.INSTANCE.getServerLogPattern());
+    mainRouter.route().handler(context -> {
+      ServerAccessLogEvent accessLogEvent = new ServerAccessLogEvent()
+          .setRoutingContext(context)
+          .setMilliStartTime(System.currentTimeMillis())
+          .setLocalAddress(LocalHostAccessItem.getLocalAddress(context));
+      context.response().endHandler(event ->
+          EventManager.post(accessLogEvent.setMilliEndTime(System.currentTimeMillis())));
+      context.next();
+    });
   }
 
   /**

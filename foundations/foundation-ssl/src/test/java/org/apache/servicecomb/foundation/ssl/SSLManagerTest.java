@@ -199,7 +199,8 @@ public class SSLManagerTest {
     };
 
     SSLEngine aSSLEngine = SSLManager.createSSLEngine(option, custom);
-    Assert.assertEquals(false, aSSLEngine.getUseClientMode());
+    // if client mode may not decided at initialization. Different JDK is different, do not check it.
+    // Assert.assertEquals(false, aSSLEngine.getUseClientMode());
     Assert.assertNotNull(aSSLEngine);
   }
 
@@ -222,7 +223,17 @@ public class SSLManagerTest {
     String peerHost = "host1";
     SSLEngine aSSLEngine = SSLManager.createSSLEngine(option, custom, peerHost, port);
     Assert.assertNotNull(aSSLEngine);
-    Assert.assertEquals("host1", aSSLEngine.getPeerHost().toString());
+    Assert.assertEquals("host1", aSSLEngine.getPeerHost());
+  }
+
+  @Test
+  public void testCreateSSLContextResource() {
+    SSLOption option = SSLOption.build(DIR + "/server.ssl.resource.properties");
+
+    SSLCustom custom = SSLCustom.defaultSSLCustom();
+
+    SSLContext context = SSLManager.createSSLContext(option, custom);
+    Assert.assertNotNull(context);
   }
 
   @Test
@@ -249,8 +260,8 @@ public class SSLManagerTest {
     };
 
     try {
-      SSLContext context = SSLManager.createSSLContext(option, custom);
-      Assert.assertNotNull(context);
+      SSLManager.createSSLContext(option, custom);
+      Assert.assertNotNull(null);
     } catch (Exception e) {
       Assert.assertEquals("java.lang.IllegalArgumentException", e.getClass().getName());
     }
@@ -280,8 +291,8 @@ public class SSLManagerTest {
     };
 
     try {
-      SSLContext context = SSLManager.createSSLContext(option, custom);
-      Assert.assertNotNull(context);
+      SSLManager.createSSLContext(option, custom);
+      Assert.assertNotNull(null);
     } catch (Exception e) {
       Assert.assertEquals("java.lang.IllegalArgumentException", e.getClass().getName());
     }
@@ -311,9 +322,9 @@ public class SSLManagerTest {
     };
 
     try {
-      SSLServerSocket context = SSLManager.createSSLServerSocket(option, custom);
+      SSLManager.createSSLServerSocket(option, custom);
 
-      Assert.assertNotNull(context);
+      Assert.assertNotNull(null);
     } catch (Exception e) {
       Assert.assertEquals("java.lang.IllegalArgumentException", e.getClass().getName());
     }
@@ -343,8 +354,8 @@ public class SSLManagerTest {
     };
 
     try {
-      SSLServerSocket context = SSLManager.createSSLServerSocket(option, custom);
-      Assert.assertNotNull(context);
+      SSLManager.createSSLServerSocket(option, custom);
+      Assert.assertNotNull(null);
     } catch (Exception e) {
       Assert.assertEquals("java.lang.IllegalArgumentException", e.getClass().getName());
     }
@@ -374,8 +385,8 @@ public class SSLManagerTest {
     };
 
     try {
-      SSLSocket context = SSLManager.createSSLSocket(option, custom);
-      Assert.assertNotNull(context);
+      SSLManager.createSSLSocket(option, custom);
+      Assert.assertNotNull(null);
     } catch (Exception e) {
       Assert.assertEquals("java.lang.IllegalArgumentException", e.getClass().getName());
     }
@@ -405,8 +416,8 @@ public class SSLManagerTest {
     };
 
     try {
-      SSLSocket context = SSLManager.createSSLSocket(option, custom);
-      Assert.assertNotNull(context);
+      SSLManager.createSSLSocket(option, custom);
+      Assert.assertNotNull(null);
     } catch (Exception e) {
       Assert.assertEquals("java.lang.IllegalArgumentException", e.getClass().getName());
     }
@@ -431,8 +442,9 @@ public class SSLManagerTest {
     Assert.assertNotNull(aSSLSocketFactory.getDefaultCipherSuites()[0]);
   }
 
+  @Test
   public void testGetSupportedCiphers() {
-    String[] ciphers = SSLManager.getEnalbedCiphers("TLS_RSA_WITH_AES_128_GCM_SHA256");
+    String[] ciphers = SSLManager.getEnabledCiphers("TLS_RSA_WITH_AES_128_GCM_SHA256");
     Assert.assertEquals(ciphers[0], "TLS_RSA_WITH_AES_128_GCM_SHA256");
   }
 }

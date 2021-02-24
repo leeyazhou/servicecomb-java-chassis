@@ -27,8 +27,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import javax.validation.constraints.NotNull;
-
 import org.apache.commons.configuration.Configuration;
 import org.apache.servicecomb.config.ConfigMapping;
 import org.apache.servicecomb.config.client.ApolloClient;
@@ -57,6 +55,11 @@ public class ApolloConfigurationSourceImpl implements ConfigCenterConfigurationS
   private final UpdateHandler updateHandler = new UpdateHandler();
 
   @Override
+  public int getOrder() {
+    return ORDER_BASE * 3;
+  }
+
+  @Override
   public boolean isValidSource(Configuration localConfiguration) {
     if (localConfiguration.getProperty(APOLLO_CONFIG_URL_KEY) == null) {
       LOGGER.warn("Apollo configuration source is not configured!");
@@ -77,12 +80,12 @@ public class ApolloConfigurationSourceImpl implements ConfigCenterConfigurationS
   }
 
   @Override
-  public void addUpdateListener(@NotNull WatchedUpdateListener watchedUpdateListener) {
+  public void addUpdateListener(WatchedUpdateListener watchedUpdateListener) {
     listeners.add(watchedUpdateListener);
   }
 
   @Override
-  public void removeUpdateListener(@NotNull WatchedUpdateListener watchedUpdateListener) {
+  public void removeUpdateListener(WatchedUpdateListener watchedUpdateListener) {
     listeners.remove(watchedUpdateListener);
   }
 

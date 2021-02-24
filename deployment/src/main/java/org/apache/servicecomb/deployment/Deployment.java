@@ -17,9 +17,13 @@
 
 package org.apache.servicecomb.deployment;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
+
+import com.google.common.annotations.VisibleForTesting;
 
 public class Deployment {
   private static List<DeploymentProvider> providerList = SPIServiceUtils.getSortedService(DeploymentProvider.class);
@@ -32,4 +36,5 @@ public class Deployment {
     }
     return null;
   }
+
 }

@@ -17,7 +17,13 @@
 
 package org.apache.servicecomb.core.bootup;
 
+import org.apache.servicecomb.core.SCBEngine;
+
 public interface BootUpInformationCollector {
+  default String collect(SCBEngine engine) {
+    return collect();
+  }
+
   String collect();
 
   int getOrder();

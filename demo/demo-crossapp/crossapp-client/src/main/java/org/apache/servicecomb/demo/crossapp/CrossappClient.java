@@ -50,12 +50,15 @@ public class CrossappClient {
     System.setProperty("sun.net.http.allowRestrictedHeaders", "false");
   }
 
+  @SuppressWarnings({"deprecation"})
   public static void run() {
     Object result = InvokerUtils.syncInvoke("appServer:appService", "helloworld", "sayHello", null);
     TestMgr.check("hello world", result);
 
     RestTemplate restTemplate = RestTemplateBuilder.create();
     result = restTemplate.getForObject("cse://appServer:appService/helloworld/hello", String.class);
+    TestMgr.check("hello world", result);
+    result = restTemplate.getForObject("servicecomb://appServer:appService/helloworld/hello", String.class);
     TestMgr.check("hello world", result);
 
     result = helloWorld.sayHello();

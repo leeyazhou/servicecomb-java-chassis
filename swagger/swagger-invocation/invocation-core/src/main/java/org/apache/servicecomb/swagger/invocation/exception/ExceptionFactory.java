@@ -17,6 +17,8 @@
 package org.apache.servicecomb.swagger.invocation.exception;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 
 import javax.ws.rs.core.Response.StatusType;
 
@@ -32,7 +34,7 @@ public final class ExceptionFactory {
   //    private static final int PROVIDER_INNER_STATUS_CODE = 510;
   public static final int PRODUCER_INNER_STATUS_CODE = 590;
 
-  public static final String PRODUCER_INNER_REASON_PHRASE = "Cse Internal Server Error";
+  public static final String PRODUCER_INNER_REASON_PHRASE = "Unexpected producer error, please check logs for details";
 
   public static final StatusType PRODUCER_INNER_STATUS =
       new HttpStatus(PRODUCER_INNER_STATUS_CODE, PRODUCER_INNER_REASON_PHRASE);
@@ -42,7 +44,7 @@ public final class ExceptionFactory {
   //    private static final int CONSUMER_INNER_STATUS_CODE = 420;
   public static final int CONSUMER_INNER_STATUS_CODE = 490;
 
-  public static final String CONSUMER_INNER_REASON_PHRASE = "Cse Internal Bad Request";
+  public static final String CONSUMER_INNER_REASON_PHRASE = "Unexpected consumer error, please check logs for details";
 
   private static ExceptionToProducerResponseConverters exceptionToProducerResponseConverters = new ExceptionToProducerResponseConverters();
 
@@ -112,9 +114,7 @@ public final class ExceptionFactory {
   // 新创建的InvocationException，会使用errorMsg来构建CommonExceptionData
   protected static InvocationException convertException(int statusCode, String reasonPhrase, Throwable e,
       String errorMsg) {
-    if (InvocationTargetException.class.isInstance(e)) {
-      e = ((InvocationTargetException) e).getTargetException();
-    }
+    e = unwrap(e);
 
     if (InvocationException.class.isInstance(e)) {
       return (InvocationException) e;
@@ -126,5 +126,27 @@ public final class ExceptionFactory {
 
   public static Response convertExceptionToResponse(SwaggerInvocation swaggerInvocation, Throwable e) {
     return exceptionToProducerResponseConverters.convertExceptionToResponse(swaggerInvocation, e);
+  }
+
+  public static Throwable unwrapIncludeInvocationException(Throwable throwable) {
+    throwable = unwrap(throwable);
+    if (throwable instanceof InvocationException) {
+      throwable = throwable.getCause();
+    }
+    return throwable;
+  }
+
+  @SuppressWarnings("unchecked")
+  public static <T extends Throwable> T unwrap(Throwable throwable) {
+    if (throwable instanceof InvocationTargetException) {
+      throwable = ((InvocationTargetException) throwable).getTargetException();
+    }
+    if (throwable instanceof CompletionException) {
+      throwable = throwable.getCause();
+    }
+    if (throwable instanceof ExecutionException) {
+      throwable = throwable.getCause();
+    }
+    return (T) throwable;
   }
 }

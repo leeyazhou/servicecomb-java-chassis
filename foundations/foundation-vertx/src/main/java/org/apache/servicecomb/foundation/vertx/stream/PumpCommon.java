@@ -21,6 +21,7 @@ import java.util.concurrent.CompletableFuture;
 import org.apache.servicecomb.foundation.common.io.AsyncCloseable;
 
 import io.vertx.core.Context;
+import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.streams.Pump;
@@ -39,7 +40,8 @@ public class PumpCommon {
    * <p>  if writeStream is not AsyncCloseable, future only means read complete
    */
   @SuppressWarnings("unchecked")
-  public CompletableFuture<Void> pump(Context context, ReadStream<Buffer> readStream, WriteStream<Buffer> writeStream) {
+  public CompletableFuture<Void> pump(Context context, ReadStream<Buffer> readStream, WriteStream<Buffer> writeStream,
+      Handler<Throwable> throwableHandler) {
     CompletableFuture<Void> readFuture = new CompletableFuture<>();
 
     writeStream.exceptionHandler(e -> {
@@ -54,6 +56,9 @@ public class PumpCommon {
         // so can only close the connection.
         ((HttpClientResponse) readStream).request().connection().close();
       }
+      if (throwableHandler != null) {
+        throwableHandler.handle(e);
+      }
       readFuture.completeExceptionally(e);
     });
     readStream.exceptionHandler(readFuture::completeExceptionally);
@@ -65,11 +70,7 @@ public class PumpCommon {
     // maybe will cause deadlock
     // if happened, vertx will print deadlock stacks
     Pump.pump(readStream, writeStream).start();
-    try {
-      context.runOnContext(v -> readStream.resume());
-    } catch (Throwable e) {
-      readFuture.completeExceptionally(e);
-    }
+    context.runOnContext(v -> readStream.resume());
 
     if (!AsyncCloseable.class.isInstance(writeStream)) {
       return readFuture;

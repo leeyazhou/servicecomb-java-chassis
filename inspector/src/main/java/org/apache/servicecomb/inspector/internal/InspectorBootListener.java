@@ -16,23 +16,13 @@
  */
 package org.apache.servicecomb.inspector.internal;
 
-import javax.inject.Inject;
-
 import org.apache.servicecomb.core.BootListener;
-import org.apache.servicecomb.core.definition.schema.ProducerSchemaFactory;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
+import org.apache.servicecomb.registry.RegistrationManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
-@Component
 public class InspectorBootListener implements BootListener {
   private static final Logger LOGGER = LoggerFactory.getLogger(InspectorBootListener.class);
-
-  @Inject
-  private ProducerSchemaFactory producerSchemaFactory;
-
-  private InspectorConfig inspectorConfig;
 
   @Override
   public int getOrder() {
@@ -40,12 +30,9 @@ public class InspectorBootListener implements BootListener {
   }
 
   @Override
-  public void onBootEvent(BootEvent event) {
-    if (event.getEventType() != EventType.AFTER_TRANSPORT) {
-      return;
-    }
-
-    inspectorConfig = event.getScbEngine().getPriorityPropertyManager().createConfigObject(InspectorConfig.class);
+  public void onAfterTransport(BootEvent event) {
+    InspectorConfig inspectorConfig = event.getScbEngine().getPriorityPropertyManager()
+        .createConfigObject(InspectorConfig.class);
     if (!inspectorConfig.isEnabled()) {
       LOGGER.info("inspector is not enabled.");
       return;
@@ -54,10 +41,8 @@ public class InspectorBootListener implements BootListener {
     LOGGER.info("inspector is enabled.");
     // will not register this schemas to service registry
     InspectorImpl inspector = new InspectorImpl(event.getScbEngine(), inspectorConfig,
-        RegistryUtils.getServiceRegistry().getMicroservice().getSchemaMap());
+        RegistrationManager.INSTANCE.getMicroservice().getSchemaMap());
     inspector.setPriorityPropertyManager(event.getScbEngine().getPriorityPropertyManager());
-    producerSchemaFactory.getOrCreateProducerSchema("inspector",
-        InspectorImpl.class,
-        inspector);
+    event.getScbEngine().getProducerProviderManager().registerSchema("inspector", inspector);
   }
 }

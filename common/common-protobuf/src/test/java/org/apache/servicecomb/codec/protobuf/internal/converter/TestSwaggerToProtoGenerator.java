@@ -18,13 +18,10 @@ package org.apache.servicecomb.codec.protobuf.internal.converter;
 
 import java.io.IOException;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.servicecomb.codec.protobuf.internal.converter.model.ProtoSchema;
-import org.apache.servicecomb.swagger.generator.core.SwaggerGenerator;
-import org.apache.servicecomb.swagger.generator.core.SwaggerGeneratorContext;
-import org.apache.servicecomb.swagger.generator.springmvc.SpringmvcSwaggerGeneratorContext;
+import org.apache.servicecomb.swagger.generator.springmvc.SpringmvcSwaggerGenerator;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -35,12 +32,11 @@ public class TestSwaggerToProtoGenerator {
   @Test
   public void convert() throws IOException {
     URL url = TestSwaggerToProtoGenerator.class.getClassLoader().getResource("ProtoSchema.proto");
-    String protoContent = IOUtils.toString(url, StandardCharsets.UTF_8);
+    String protoContent = IOUtils.toString(url, "UTF-8");
     int idx = protoContent.indexOf("syntax = ");
     protoContent = protoContent.substring(idx);
 
-    SwaggerGeneratorContext context = new SpringmvcSwaggerGeneratorContext();
-    SwaggerGenerator swaggerGenerator = new SwaggerGenerator(context, ProtoSchema.class);
+    SpringmvcSwaggerGenerator swaggerGenerator = new SpringmvcSwaggerGenerator(ProtoSchema.class);
     Swagger swagger = swaggerGenerator.generate();
 
     SwaggerToProtoGenerator generator = new SwaggerToProtoGenerator("a.b", swagger);
@@ -48,5 +44,17 @@ public class TestSwaggerToProtoGenerator {
 
     Assert.assertEquals(protoContent.replaceAll("\r\n", "\n"),
         new ProtoToStringGenerator(proto).protoToString().replaceAll("\r\n", "\n"));
+  }
+
+  @Test
+  public void testEscape() {
+    Assert.assertEquals("hello_my_service", SwaggerToProtoGenerator.escapeMessageName("hello.my.service"));
+    Assert.assertEquals("hello_my_service", SwaggerToProtoGenerator.escapeMessageName("hello_my_service"));
+    Assert.assertEquals("hello.my_service", SwaggerToProtoGenerator.escapePackageName("hello.my-service"));
+    Assert.assertEquals("hello.test.test", SwaggerToProtoGenerator.escapePackageName("hello.test.test"));
+    Assert.assertEquals("hello_my.test.test", SwaggerToProtoGenerator.escapePackageName("hello:my.test.test"));
+    Assert.assertEquals(false, SwaggerToProtoGenerator.isValidEnum("hello.test.test"));
+    Assert.assertEquals(false, SwaggerToProtoGenerator.isValidEnum("hello.my-service"));
+    Assert.assertEquals(true, SwaggerToProtoGenerator.isValidEnum("My_ENum"));
   }
 }

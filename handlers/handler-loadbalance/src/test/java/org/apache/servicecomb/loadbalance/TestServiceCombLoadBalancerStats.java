@@ -25,9 +25,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.servicecomb.core.Transport;
 import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstance;
-import org.apache.servicecomb.serviceregistry.cache.CacheEndpoint;
-import org.apache.servicecomb.serviceregistry.consumer.MicroserviceInstancePing;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstance;
+import org.apache.servicecomb.registry.cache.CacheEndpoint;
+import org.apache.servicecomb.registry.consumer.MicroserviceInstancePing;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
@@ -74,10 +74,10 @@ public class TestServiceCombLoadBalancerStats {
 
     ServiceCombLoadBalancerStats serviceCombLoadBalancerStats = new ServiceCombLoadBalancerStats();
     serviceCombLoadBalancerStats.setServerExpireInSeconds(2);
-    serviceCombLoadBalancerStats.setTimerIntervalInMilis(500);
+    serviceCombLoadBalancerStats.setTimerIntervalInMillis(500);
     serviceCombLoadBalancerStats.init();
 
-    ServiceCombServer serviceCombServer = new ServiceCombServer(transport,
+    ServiceCombServer serviceCombServer = new ServiceCombServer(null, transport,
         new CacheEndpoint("rest://localhost:8080", instance));
     serviceCombLoadBalancerStats.markSuccess(serviceCombServer);
     ServiceCombServerStats stats = serviceCombLoadBalancerStats.getServiceCombServerStats(serviceCombServer);
@@ -94,16 +94,16 @@ public class TestServiceCombLoadBalancerStats {
     long time = System.currentTimeMillis();
     MicroserviceInstance instance = new MicroserviceInstance();
     instance.setInstanceId("instance1");
-    ServiceCombServer serviceCombServer = new ServiceCombServer(transport,
+    ServiceCombServer serviceCombServer = new ServiceCombServer(null, transport,
         new CacheEndpoint("rest://localhost:8080", instance));
     ServiceCombLoadBalancerStats.INSTANCE.markFailure(serviceCombServer);
     ServiceCombLoadBalancerStats.INSTANCE.markFailure(serviceCombServer);
     Assert.assertEquals(
-        ServiceCombLoadBalancerStats.INSTANCE.getServiceCombServerStats(serviceCombServer).getCountinuousFailureCount(),
+        ServiceCombLoadBalancerStats.INSTANCE.getServiceCombServerStats(serviceCombServer).getContinuousFailureCount(),
         2);
     ServiceCombLoadBalancerStats.INSTANCE.markSuccess(serviceCombServer);
     Assert.assertEquals(
-        ServiceCombLoadBalancerStats.INSTANCE.getServiceCombServerStats(serviceCombServer).getCountinuousFailureCount(),
+        ServiceCombLoadBalancerStats.INSTANCE.getServiceCombServerStats(serviceCombServer).getContinuousFailureCount(),
         0);
     ServiceCombLoadBalancerStats.INSTANCE.markSuccess(serviceCombServer);
     Assert
@@ -125,7 +125,7 @@ public class TestServiceCombLoadBalancerStats {
     long time = System.currentTimeMillis();
     MicroserviceInstance instance = new MicroserviceInstance();
     instance.setInstanceId("instance2");
-    ServiceCombServer serviceCombServer = new ServiceCombServer(transport,
+    ServiceCombServer serviceCombServer = new ServiceCombServer(null, transport,
         new CacheEndpoint("rest://localhost:8080", instance));
 
     CountDownLatch latch = new CountDownLatch(10);

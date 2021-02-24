@@ -17,7 +17,7 @@
 
 package org.apache.servicecomb.core;
 
-import org.apache.servicecomb.serviceregistry.definition.DefinitionConst;
+import org.apache.servicecomb.registry.definition.DefinitionConst;
 
 public final class Const {
   private Const() {
@@ -36,6 +36,8 @@ public final class Const {
   public static final String DEFAULT_VERSION_RULE = DefinitionConst.VERSION_RULE_ALL;
 
   public static final String PRODUCER_OPERATION = "producer-operation";
+
+  public static final String CONSUMER_OPERATION = "consumer-operation";
 
   public static final String SRC_MICROSERVICE = "x-cse-src-microservice";
 

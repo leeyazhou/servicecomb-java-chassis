@@ -26,7 +26,8 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <java-chassis.version>2.0.0-SNAPSHOT</java-chassis.version>
+    <!-- this version is used for archetype, do not need to change when release a new version -->
+    <java-chassis.version>2.0.0</java-chassis.version>
     <springboot.version>2.1.2.RELEASE</springboot.version>
   </properties>
 
@@ -45,7 +46,7 @@
   <dependencies>
     <dependency>
       <groupId>org.apache.servicecomb</groupId>
-      <artifactId>spring-boot2-starter-standalone</artifactId>
+      <artifactId>java-chassis-spring-boot-starter-standalone</artifactId>
     </dependency>
   </dependencies>
 

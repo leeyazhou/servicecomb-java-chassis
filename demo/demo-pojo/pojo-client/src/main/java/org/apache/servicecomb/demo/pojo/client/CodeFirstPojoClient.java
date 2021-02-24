@@ -22,17 +22,16 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 
 import javax.inject.Inject;
 
-import org.apache.servicecomb.core.CseContext;
 import org.apache.servicecomb.demo.CodeFirstPojoIntf;
 import org.apache.servicecomb.demo.DemoConst;
 import org.apache.servicecomb.demo.TestMgr;
 import org.apache.servicecomb.demo.compute.Person;
 import org.apache.servicecomb.demo.server.User;
+import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.foundation.vertx.VertxUtils;
 import org.apache.servicecomb.provider.pojo.RpcReference;
 import org.apache.servicecomb.swagger.invocation.context.ContextUtils;
@@ -52,16 +51,23 @@ public class CodeFirstPojoClient {
 
   public void testCodeFirst(String microserviceName) {
     for (String transport : DemoConst.transports) {
-      CseContext.getInstance().getConsumerProviderManager().setTransport(microserviceName, transport);
+      ArchaiusUtils.setProperty("servicecomb.references.transport." + microserviceName, transport);
       TestMgr.setMsg(microserviceName, transport);
 
-      testAll(codeFirstAnnotation, transport);
-      testAll(codeFirstAnnotationEmptySchemaId, transport);
-      testAll(codeFirstFromXml, transport);
+      testAll(codeFirstAnnotation);
+      testAll(codeFirstAnnotationEmptySchemaId);
+      testAll(codeFirstFromXml);
     }
+
+    ArchaiusUtils.setProperty("servicecomb.references.transport." + microserviceName, "rest");
+    testOnlyRest(codeFirstAnnotation);
   }
 
-  protected void testAll(CodeFirstPojoIntf codeFirst, String transport) {
+  private void testOnlyRest(CodeFirstPojoIntf codeFirst) {
+    testCodeFirstStrings(codeFirst);
+  }
+
+  private void testAll(CodeFirstPojoIntf codeFirst) {
     testCodeFirstUserMap(codeFirst);
     testCodeFirstUserArray(codeFirst);
     testCodeFirstStrings(codeFirst);
@@ -91,18 +97,19 @@ public class CodeFirstPojoClient {
       InvocationContext context = new InvocationContext();
       context.addContext("k", "v");
       ContextUtils.setInvocationContext(context);
-      CompletableFuture<String> future = ((CodeFirstPojoClientIntf) codeFirst).sayHiAsync("someone");
 
-      future.thenCompose(result -> {
-        TestMgr.check("someone sayhi, context k: v", result);
+      ((CodeFirstPojoClientIntf) codeFirst).sayHiAsync("someone")
+          .thenCompose(result -> {
+            TestMgr.check("someone sayhi, context k: v", result);
 
-        TestMgr.check(true, context == ContextUtils.getInvocationContext());
+            TestMgr.check(true, context == ContextUtils.getInvocationContext());
 
-        return ((CodeFirstPojoClientIntf) codeFirst).sayHiAsync("someone 1");
-      }).whenComplete((r, e) -> {
-        TestMgr.check("someone 1 sayhi, context k: v", r);
-        latch.countDown();
-      });
+            return ((CodeFirstPojoClientIntf) codeFirst).sayHiAsync("someone 1");
+          })
+          .whenComplete((r, e) -> {
+            TestMgr.check("someone 1 sayhi, context k: v", r);
+            latch.countDown();
+          });
 
       ContextUtils.removeInvocationContext();
     });
@@ -169,17 +176,17 @@ public class CodeFirstPojoClient {
     TestMgr.check(new Date(date.getTime() + seconds * 1000), result);
   }
 
-  protected void testCodeFirstAddString(CodeFirstPojoIntf codeFirst) {
+  private void testCodeFirstAddString(CodeFirstPojoIntf codeFirst) {
     String result = codeFirst.addString(Arrays.asList("a", "b"));
     TestMgr.check("ab", result);
   }
 
-  protected void testCodeFirstIsTrue(CodeFirstPojoIntf codeFirst) {
+  private void testCodeFirstIsTrue(CodeFirstPojoIntf codeFirst) {
     boolean result = codeFirst.isTrue();
     TestMgr.check(true, result);
   }
 
-  protected void testCodeFirstSayHi2(CodeFirstPojoIntf codeFirst) {
+  private void testCodeFirstSayHi2(CodeFirstPojoIntf codeFirst) {
     if (!CodeFirstPojoClientIntf.class.isInstance(codeFirst)) {
       return;
     }
@@ -188,13 +195,13 @@ public class CodeFirstPojoClient {
     TestMgr.check("world sayhi 2", result);
   }
 
-  protected void testCodeFirstSayHi(CodeFirstPojoIntf codeFirst) {
+  private void testCodeFirstSayHi(CodeFirstPojoIntf codeFirst) {
     String result = codeFirst.sayHi("world");
     TestMgr.check("world sayhi, context k: null", result);
     //        TestMgr.check(202, responseEntity.getStatusCode());
   }
 
-  protected void testCodeFirstSaySomething(CodeFirstPojoIntf codeFirst) {
+  private void testCodeFirstSaySomething(CodeFirstPojoIntf codeFirst) {
     Person person = new Person();
     person.setName("person name");
 
@@ -202,7 +209,7 @@ public class CodeFirstPojoClient {
     TestMgr.check("prefix  prefix person name", result);
   }
 
-  protected void testCodeFirstSayHello(CodeFirstPojoIntf codeFirst) {
+  private void testCodeFirstSayHello(CodeFirstPojoIntf codeFirst) {
     Person input = new Person();
     input.setName("person name");
 
@@ -210,7 +217,7 @@ public class CodeFirstPojoClient {
     TestMgr.check("hello person name", result.getName());
   }
 
-  protected void testCodeFirstReduce(CodeFirstPojoIntf codeFirst) {
+  private void testCodeFirstReduce(CodeFirstPojoIntf codeFirst) {
     int result = codeFirst.reduce(5, 3);
     TestMgr.check(2, result);
   }

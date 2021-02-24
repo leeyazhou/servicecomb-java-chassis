@@ -16,6 +16,8 @@
  */
 package org.apache.servicecomb.it;
 
+import org.apache.servicecomb.common.rest.HttpTransportContext;
+import org.apache.servicecomb.common.rest.VertxHttpTransportContext;
 import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.foundation.common.utils.BeanUtils;
 import org.apache.servicecomb.it.deploy.Deploys;
@@ -38,6 +40,7 @@ import org.apache.servicecomb.it.testcase.TestExceptionConvertEdge;
 import org.apache.servicecomb.it.testcase.TestGenericEdge;
 import org.apache.servicecomb.it.testcase.TestIgnoreMethod;
 import org.apache.servicecomb.it.testcase.TestIgnoreStaticMethod;
+import org.apache.servicecomb.it.testcase.TestJsonView;
 import org.apache.servicecomb.it.testcase.TestOptional;
 import org.apache.servicecomb.it.testcase.TestParamCodec;
 import org.apache.servicecomb.it.testcase.TestParamCodecEdge;
@@ -45,11 +48,20 @@ import org.apache.servicecomb.it.testcase.TestRequestBodySpringMvcSchema;
 import org.apache.servicecomb.it.testcase.TestRestController;
 import org.apache.servicecomb.it.testcase.TestRestServerConfigEdge;
 import org.apache.servicecomb.it.testcase.TestRestVertxTransportConfig;
+import org.apache.servicecomb.it.testcase.TestSpringConfiguration;
 import org.apache.servicecomb.it.testcase.TestTrace;
 import org.apache.servicecomb.it.testcase.TestTraceEdge;
+import org.apache.servicecomb.it.testcase.TestTransportContext;
 import org.apache.servicecomb.it.testcase.TestUpload;
 import org.apache.servicecomb.it.testcase.base.TestGeneric;
+import org.apache.servicecomb.it.testcase.objectparams.TestJAXRSObjectParamType;
+import org.apache.servicecomb.it.testcase.objectparams.TestRPCObjectParamType;
+import org.apache.servicecomb.it.testcase.objectparams.TestSpringMVCObjectParamType;
+import org.apache.servicecomb.it.testcase.objectparams.TestSpringMVCObjectParamTypeRestOnly;
+import org.apache.servicecomb.it.testcase.publicHeaders.TestPublicHeadersEdge;
 import org.apache.servicecomb.it.testcase.thirdparty.Test3rdPartyInvocation;
+import org.apache.servicecomb.it.testcase.weak.consumer.TestSpringmvcBasic;
+import org.apache.servicecomb.transport.highway.HighwayTransportContext;
 
 public class ConsumerMain {
   private static ResultPrinter resultPrinter = new ResultPrinter();
@@ -80,6 +92,8 @@ public class ConsumerMain {
   }
 
   protected static void run() throws Throwable {
+    ITJUnitUtils.run(TestSpringConfiguration.class);
+
     // deploy edge/zuul
     // if not ready, will start a new instance and wait for ready
     deploys.getEdge().ensureReady();
@@ -92,7 +106,9 @@ public class ConsumerMain {
       ITJUnitUtils.run(TestApiOperation.class);
 
       testOneProducer(deploys.getBaseProducer(), ConsumerMain::testStandalone);
-      testOneProducer(deploys.getBaseHttp2Producer(), ConsumerMain::testH2Standalone);
+      // Running H2, there are many dependencies, like JDk version, open ssl version
+      // We can not guarantee the CI satisfy this. So do not running this test.
+//      testOneProducer(deploys.getBaseHttp2Producer(), ConsumerMain::testH2Standalone);
       testOneProducer(deploys.getBaseHttp2CProducer(), ConsumerMain::testH2CStandalone);
 
       testOneProducer(deploys.getSpringBoot2StandaloneProducer(), ConsumerMain::testSpringBoot2Standalone);
@@ -103,10 +119,14 @@ public class ConsumerMain {
   }
 
   private static void runShareTestCases() throws Throwable {
+    ITJUnitUtils.runWithHighwayAndRest(TestPublicHeadersEdge.class);
     ITJUnitUtils.runWithHighwayAndRest(TestChangeTransport.class);
     ITJUnitUtils.runWithHighwayAndRest(TestDataTypePrimitive.class);
     ITJUnitUtils.runWithHighwayAndRest(TestAnnotatedAttribute.class);
     ITJUnitUtils.runWithHighwayAndRest(TestMyService.class);
+
+    //only rest support Json view
+    ITJUnitUtils.runWithRest(TestJsonView.class);
 
     // only rest support default value feature
     ITJUnitUtils.runWithRest(TestDefaultValue.class);
@@ -135,6 +155,13 @@ public class ConsumerMain {
 
     ITJUnitUtils.runWithHighwayAndRest(TestOptional.class);
     ITJUnitUtils.runWithHighwayAndRest(TestApiOperationOverride.class);
+
+    ITJUnitUtils.runWithHighwayAndRest(TestSpringMVCObjectParamType.class);
+    ITJUnitUtils.runWithHighwayAndRest(TestSpringMVCObjectParamTypeRestOnly.class);
+    ITJUnitUtils.runWithHighwayAndRest(TestJAXRSObjectParamType.class);
+    ITJUnitUtils.runWithHighwayAndRest(TestRPCObjectParamType.class);
+
+    ITJUnitUtils.runWithHighwayAndRest(TestSpringmvcBasic.class);
   }
 
   interface ITTask {
@@ -165,6 +192,12 @@ public class ConsumerMain {
 
     // currently, only support vertx download
     ITJUnitUtils.run(TestDownloadSlowStreamEdge.class);
+
+    TestTransportContext.expectName = VertxHttpTransportContext.class.getName();
+    ITJUnitUtils.runWithRest(TestTransportContext.class);
+
+    TestTransportContext.expectName = HighwayTransportContext.class.getName();
+    ITJUnitUtils.runWithHighway(TestTransportContext.class);
   }
 
   private static void testH2CStandalone() throws Throwable {
@@ -192,5 +225,8 @@ public class ConsumerMain {
 
   private static void testSpringBoot2Servlet() throws Throwable {
     runShareTestCases();
+
+    TestTransportContext.expectName = HttpTransportContext.class.getName();
+    ITJUnitUtils.runWithRest(TestTransportContext.class);
   }
 }

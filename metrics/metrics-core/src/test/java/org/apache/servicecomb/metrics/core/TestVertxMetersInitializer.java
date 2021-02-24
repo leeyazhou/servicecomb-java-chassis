@@ -19,13 +19,13 @@ package org.apache.servicecomb.metrics.core;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.servicecomb.core.transport.AbstractTransport;
-import org.apache.servicecomb.core.transport.TransportVertxFactory;
 import org.apache.servicecomb.foundation.metrics.PolledEvent;
 import org.apache.servicecomb.foundation.metrics.registry.GlobalRegistry;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.foundation.test.scaffolding.log.LogCollector;
+import org.apache.servicecomb.foundation.vertx.SharedVertxFactory;
 import org.apache.servicecomb.foundation.vertx.VertxUtils;
+import org.apache.servicecomb.foundation.vertx.client.http.HttpClients;
 import org.apache.servicecomb.metrics.core.publish.DefaultLogPublisher;
 import org.junit.After;
 import org.junit.Assert;
@@ -46,7 +46,6 @@ import io.vertx.core.Future;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpServer;
 import io.vertx.ext.web.Router;
-import mockit.Expectations;
 
 public class TestVertxMetersInitializer {
   GlobalRegistry globalRegistry = new GlobalRegistry(new ManualClock());
@@ -54,8 +53,6 @@ public class TestVertxMetersInitializer {
   Registry registry = new DefaultRegistry(globalRegistry.getClock());
 
   EventBus eventBus = new EventBus();
-
-  TransportVertxFactory transportVertxFactory;
 
   VertxMetersInitializer vertxMetersInitializer = new VertxMetersInitializer();
 
@@ -94,7 +91,7 @@ public class TestVertxMetersInitializer {
     @Override
     public void start(Future<Void> startFuture) {
       HttpClient client = vertx.createHttpClient();
-      client.post(port, "127.127.127.127", "/").handler(resp -> {
+      client.post(port, "127.0.0.1", "/").handler(resp -> {
         resp.bodyHandler((buffer) -> {
           startFuture.complete();
         });
@@ -104,39 +101,23 @@ public class TestVertxMetersInitializer {
 
   @Before
   public void setup() {
-    VertxUtils.blockCloseVertxByName("transport");
+    HttpClients.load();
   }
 
   @After
   public void teardown() {
-    VertxUtils.blockCloseVertxByName("transport");
+    HttpClients.destroy();
   }
 
   @Test
   public void init() throws InterruptedException {
-    transportVertxFactory = new TransportVertxFactory();
-    new Expectations(AbstractTransport.class) {
-      {
-        AbstractTransport.getTransportVertxFactory();
-        result = transportVertxFactory;
-      }
-    };
-    // TODO will be fixed by next vertx update.
-//    new Expectations(VertxUtils.class) {
-//      {
-
-//        VertxUtils.getEventLoopContextCreatedCount(anyString);
-//        result = 4;
-//      }
-//    };
-
     globalRegistry.add(registry);
     vertxMetersInitializer.init(globalRegistry, eventBus, null);
     logPublisher.init(null, eventBus, null);
     VertxUtils
-        .blockDeploy(transportVertxFactory.getTransportVertx(), TestServerVerticle.class, new DeploymentOptions());
+        .blockDeploy(SharedVertxFactory.getSharedVertx(), TestServerVerticle.class, new DeploymentOptions());
     VertxUtils
-        .blockDeploy(transportVertxFactory.getTransportVertx(), TestClientVerticle.class, new DeploymentOptions());
+        .blockDeploy(SharedVertxFactory.getSharedVertx(), TestClientVerticle.class, new DeploymentOptions());
 
     globalRegistry.poll(1);
     List<Meter> meters = Lists.newArrayList(registry.iterator());
@@ -168,21 +149,23 @@ public class TestVertxMetersInitializer {
     String expect = "vertx:\n"
         + "  instances:\n"
         + "    name       eventLoopContext-created\n"
+        + "    registry   0\n"
+        + "    registry-watch 0\n"
         + "    transport  0\n"
         + "  transport:\n"
         + "    client.endpoints:\n"
-        + "      remote                connectCount disconnectCount queue         connections send(Bps) receive(Bps)\n";
+        + "      connectCount disconnectCount queue         connections send(Bps) receive(Bps) remote\n";
     if (printDetail) {
       expect += String.format(
-          "      127.127.127.127:%-5s 1            0               0             1           4         21\n",
+          "      1            0               0             1           4         21           127.0.0.1:%-5s\n",
           port);
     }
     expect += ""
-        + "      (summary)             1            0               0             1           4         21\n"
+        + "      1            0               0             1           4         21           (summary)\n"
         + "    server.endpoints:\n"
-        + "      listen                connectCount disconnectCount rejectByLimit connections send(Bps) receive(Bps)\n"
-        + "      0.0.0.0:0             1            0               0             1           21        4\n"
-        + "      (summary)             1            0               0             1           21        4\n\n";
+        + "      connectCount disconnectCount rejectByLimit connections send(Bps) receive(Bps) listen\n"
+        + "      1            0               0             1           21        4            0.0.0.0:0\n"
+        + "      1            0               0             1           21        4            (summary)\n\n";
     Assert.assertEquals(expect, actual);
   }
 }

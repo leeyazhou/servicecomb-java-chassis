@@ -17,32 +17,40 @@
 package org.apache.servicecomb.authentication;
 
 import org.apache.servicecomb.AuthHandlerBoot;
+import org.apache.servicecomb.config.ConfigUtil;
 import org.apache.servicecomb.core.BootListener;
 import org.apache.servicecomb.core.BootListener.BootEvent;
+import org.apache.servicecomb.core.SCBEngine;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
+import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.foundation.token.RSAKeypair4Auth;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
-import org.apache.servicecomb.serviceregistry.api.registry.Microservice;
-import org.apache.servicecomb.serviceregistry.api.registry.MicroserviceInstance;
+import org.apache.servicecomb.registry.api.registry.Microservice;
+import org.apache.servicecomb.registry.api.registry.MicroserviceInstance;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
-import mockit.Expectations;
-
 public class TestAuthHandlerBoot {
+  private SCBEngine engine;
 
+  @Before
+  public void setUp() {
+    ConfigUtil.installDynamicConfig();
+    engine = SCBBootstrap.createSCBEngineForTest().run();
+  }
+
+  @After
+  public void teardown() {
+    engine.destroy();
+    ArchaiusUtils.resetConfig();
+  }
 
   @Test
   public void testGenerateRSAKey() {
     MicroserviceInstance microserviceInstance = new MicroserviceInstance();
     Microservice microservice = new Microservice();
     microservice.setInstance(microserviceInstance);
-    new Expectations(RegistryUtils.class) {
-      {
-
-        RegistryUtils.getMicroserviceInstance();
-        result = microserviceInstance;
-      }
-    };
 
     AuthHandlerBoot authHandlerBoot = new AuthHandlerBoot();
     BootEvent bootEvent = new BootEvent();

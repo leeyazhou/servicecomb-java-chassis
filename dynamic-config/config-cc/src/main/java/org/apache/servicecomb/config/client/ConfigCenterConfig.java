@@ -17,13 +17,12 @@
 
 package org.apache.servicecomb.config.client;
 
-import static org.apache.servicecomb.foundation.common.base.ServiceCombConstants.DEFAULT_SERVICECOMB_ENV;
-import static org.apache.servicecomb.foundation.common.base.ServiceCombConstants.SERVICECOMB_ENV;
-
 import java.util.List;
 
+import org.apache.servicecomb.config.BootStrapProperties;
 import org.apache.servicecomb.deployment.Deployment;
 import org.apache.servicecomb.deployment.DeploymentProvider;
+import org.apache.servicecomb.foundation.vertx.VertxConst;
 
 import com.google.common.base.Joiner;
 import com.netflix.config.ConcurrentCompositeConfiguration;
@@ -51,25 +50,13 @@ public final class ConfigCenterConfig {
 
   private static final String FIRST_REFRESH_INTERVAL = "servicecomb.config.client.first_refresh_interval";
 
-  private static final String SERVICE_NAME = "service_description.name";
+  public static final String CONNECTION_TIME_OUT = "servicecomb.config.client.timeout.connection";
 
-  private static final String SERVICE_VERSION = "service_description.version";
+  public static final String EVENT_LOOP_SIZE = "servicecomb.config.client.eventLoopSize";
 
-  private static final String APPLICATION_NAME = "APPLICATION_ID";
+  public static final String VERTICAL_INSTANCE_COUNT = "servicecomb.config.client.verticalInstanceCount";
 
-  private static final String INSTANCE_TAGS = "instance_description.properties.tags";
-
-  public static final String PROXY_PRE_NAME = "servicecomb.proxy.";
-
-  public static final String PROXY_ENABLE = PROXY_PRE_NAME + "enable";
-
-  public static final String PROXY_HOST = PROXY_PRE_NAME + "host";
-
-  public static final String PROXY_PORT = PROXY_PRE_NAME + "port";
-
-  public static final String PROXY_USERNAME = PROXY_PRE_NAME + "username";
-
-  public static final String PROXY_PASSWD = PROXY_PRE_NAME + "passwd";
+  public static final String IDLE_TIMEOUT_IN_SECONDES = "servicecomb.config.client.idleTimeoutInSeconds";
 
   private static final int DEFAULT_REFRESH_MODE = 0;
 
@@ -79,8 +66,6 @@ public final class ConfigCenterConfig {
 
   private static final int DEFAULT_FIRST_REFRESH_INTERVAL = 0;
 
-  private static final int DEFAULT_TIMEOUT_IN_MS = 30000;
-
   private ConfigCenterConfig() {
   }
 
@@ -88,7 +73,7 @@ public final class ConfigCenterConfig {
     finalConfig = config;
   }
 
-  public ConcurrentCompositeConfiguration getConcurrentCompositeConfiguration() {
+  public static ConcurrentCompositeConfiguration getConcurrentCompositeConfiguration() {
     return finalConfig;
   }
 
@@ -125,40 +110,40 @@ public final class ConfigCenterConfig {
   }
 
   public Boolean isProxyEnable() {
-    return finalConfig.getBoolean(PROXY_ENABLE, false);
+    return finalConfig.getBoolean(VertxConst.PROXY_ENABLE, false);
   }
 
   public String getProxyHost() {
-    return finalConfig.getString(PROXY_HOST, "127.0.0.1");
+    return finalConfig.getString(VertxConst.PROXY_HOST, "127.0.0.1");
   }
 
   public int getProxyPort() {
-    return finalConfig.getInt(PROXY_PORT, 8080);
+    return finalConfig.getInt(VertxConst.PROXY_PORT, 8080);
   }
 
   public String getProxyUsername() {
-    return finalConfig.getString(PROXY_USERNAME, null);
+    return finalConfig.getString(VertxConst.PROXY_USERNAME, null);
   }
 
   public String getProxyPasswd() {
-    return finalConfig.getString(PROXY_PASSWD, null);
+    return finalConfig.getString(VertxConst.PROXY_PASSWD, null);
   }
 
   @SuppressWarnings("unchecked")
   public String getServiceName() {
-    String service = finalConfig.getString(SERVICE_NAME);
-    String appName = finalConfig.getString(APPLICATION_NAME);
+    String service = BootStrapProperties.readServiceName(finalConfig);
+    String appName = BootStrapProperties.readApplication(finalConfig);
     String tags;
     if (appName != null) {
       service = service + "@" + appName;
     }
 
-    String serviceVersion = finalConfig.getString(SERVICE_VERSION);
+    String serviceVersion = BootStrapProperties.readServiceVersion(finalConfig);
     if (serviceVersion != null) {
       service = service + "#" + serviceVersion;
     }
 
-    Object o = finalConfig.getProperty(INSTANCE_TAGS);
+    Object o = BootStrapProperties.readServiceInstanceTags(finalConfig);
     if (o == null) {
       return service;
     }
@@ -180,10 +165,22 @@ public final class ConfigCenterConfig {
   }
 
   public int getConnectionTimeout() {
-    return finalConfig.getInt("servicecomb.config.client.timeout.connection", DEFAULT_TIMEOUT_IN_MS);
+    return finalConfig.getInt(CONNECTION_TIME_OUT, 1000);
+  }
+
+  public int getEventLoopSize() {
+    return finalConfig.getInt(EVENT_LOOP_SIZE, 2);
+  }
+
+  public int getVerticalInstanceCount() {
+    return finalConfig.getInt(VERTICAL_INSTANCE_COUNT, 1);
+  }
+
+  public int getIdleTimeoutInSeconds() {
+    return finalConfig.getInt(IDLE_TIMEOUT_IN_SECONDES, 60);
   }
 
   public String getEnvironment() {
-    return finalConfig.getString(SERVICECOMB_ENV, DEFAULT_SERVICECOMB_ENV);
+    return BootStrapProperties.readServiceEnvironment(finalConfig);
   }
 }

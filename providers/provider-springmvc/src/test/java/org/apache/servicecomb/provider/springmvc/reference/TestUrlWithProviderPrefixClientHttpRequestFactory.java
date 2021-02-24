@@ -24,6 +24,7 @@ import java.util.Map;
 
 import org.apache.servicecomb.common.rest.RestConst;
 import org.apache.servicecomb.core.Invocation;
+import org.apache.servicecomb.core.definition.InvocationRuntimeType;
 import org.apache.servicecomb.core.definition.OperationMeta;
 import org.apache.servicecomb.core.invocation.InvocationFactory;
 import org.apache.servicecomb.core.provider.consumer.ReferenceConfig;
@@ -51,6 +52,7 @@ public class TestUrlWithProviderPrefixClientHttpRequestFactory {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
   public void invoke_checkPath(@Mocked Invocation invocation, @Mocked RequestMeta requestMeta) {
     Map<String, String> handlerContext = new HashMap<>();
     UrlWithProviderPrefixClientHttpRequest request = new UrlWithProviderPrefixClientHttpRequest(uri, HttpMethod.GET,
@@ -65,7 +67,8 @@ public class TestUrlWithProviderPrefixClientHttpRequestFactory {
       {
         invocation.getHandlerContext();
         result = handlerContext;
-        InvocationFactory.forConsumer((ReferenceConfig) any, (OperationMeta) any, (Object[]) any);
+        InvocationFactory.forConsumer((ReferenceConfig) any, (OperationMeta) any, (InvocationRuntimeType) any,
+            (Map<String, Object>) any);
         result = invocation;
       }
     };
@@ -73,7 +76,7 @@ public class TestUrlWithProviderPrefixClientHttpRequestFactory {
     Deencapsulation.setField(request, "requestMeta", requestMeta);
     Deencapsulation.setField(request, "path", request.findUriPath(uri));
 
-    Deencapsulation.invoke(request, "invoke", new Object[] {new Object[] {}});
+    Deencapsulation.invoke(request, "invoke", new HashMap<>());
 
     Assert.assertEquals("/v1/path", handlerContext.get(RestConst.REST_CLIENT_REQUEST_PATH));
   }

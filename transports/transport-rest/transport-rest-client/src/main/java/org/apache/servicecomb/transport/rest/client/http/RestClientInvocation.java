@@ -18,8 +18,9 @@
 package org.apache.servicecomb.transport.rest.client.http;
 
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 
-import javax.servlet.http.Part;
+import javax.ws.rs.core.Response.Status;
 
 import org.apache.servicecomb.common.rest.RestConst;
 import org.apache.servicecomb.common.rest.codec.param.RestClientRequestImpl;
@@ -32,6 +33,7 @@ import org.apache.servicecomb.core.invocation.InvocationStageTrace;
 import org.apache.servicecomb.foundation.common.http.HttpStatus;
 import org.apache.servicecomb.foundation.common.net.IpPort;
 import org.apache.servicecomb.foundation.common.net.URIEndpointObject;
+import org.apache.servicecomb.foundation.common.utils.ExceptionUtils;
 import org.apache.servicecomb.foundation.common.utils.JsonUtils;
 import org.apache.servicecomb.foundation.vertx.client.http.HttpClientWithContext;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletRequestEx;
@@ -40,13 +42,16 @@ import org.apache.servicecomb.foundation.vertx.http.ReadStreamPart;
 import org.apache.servicecomb.foundation.vertx.http.VertxClientRequestToHttpServletRequest;
 import org.apache.servicecomb.foundation.vertx.http.VertxClientResponseToHttpServletResponse;
 import org.apache.servicecomb.foundation.vertx.metrics.metric.DefaultHttpSocketMetric;
-import org.apache.servicecomb.serviceregistry.api.Const;
+import org.apache.servicecomb.registry.definition.DefinitionConst;
 import org.apache.servicecomb.swagger.invocation.AsyncResponse;
 import org.apache.servicecomb.swagger.invocation.Response;
+import org.apache.servicecomb.swagger.invocation.exception.CommonExceptionData;
+import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
 
+import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
@@ -68,6 +73,8 @@ public class RestClientInvocation {
 
   private Invocation invocation;
 
+  private RestOperationMeta restOperationMeta;
+
   private AsyncResponse asyncResp;
 
   private List<HttpClientFilter> httpClientFilters;
@@ -75,6 +82,10 @@ public class RestClientInvocation {
   private HttpClientRequest clientRequest;
 
   private HttpClientResponse clientResponse;
+
+  private Handler<Throwable> throwableHandler = e -> fail((ConnectionBase) clientRequest.connection(), e);
+
+  private boolean alreadyFailed = false;
 
   public RestClientInvocation(HttpClientWithContext httpClientWithContext, List<HttpClientFilter> httpClientFilters) {
     this.httpClientWithContext = httpClientWithContext;
@@ -86,15 +97,15 @@ public class RestClientInvocation {
     this.asyncResp = asyncResp;
 
     OperationMeta operationMeta = invocation.getOperationMeta();
-    RestOperationMeta swaggerRestOperation = operationMeta.getExtData(RestConst.SWAGGER_REST_OPERATION);
+    restOperationMeta = operationMeta.getExtData(RestConst.SWAGGER_REST_OPERATION);
 
-    String path = this.createRequestPath(swaggerRestOperation);
+    String path = this.createRequestPath(restOperationMeta);
     IpPort ipPort = (IpPort) invocation.getEndpoint().getAddress();
 
     createRequest(ipPort, path);
     clientRequest.putHeader(org.apache.servicecomb.core.Const.TARGET_MICROSERVICE, invocation.getMicroserviceName());
     RestClientRequestImpl restClientRequest =
-        new RestClientRequestImpl(clientRequest, httpClientWithContext.context(), asyncResp);
+        new RestClientRequestImpl(clientRequest, httpClientWithContext.context(), asyncResp, throwableHandler);
     invocation.getHandlerContext().put(RestConst.INVOCATION_HANDLER_REQUESTCLIENT, restClientRequest);
 
     Buffer requestBodyBuffer = restClientRequest.getBodyBuffer();
@@ -107,21 +118,11 @@ public class RestClientInvocation {
     }
 
     clientRequest.exceptionHandler(e -> {
-      LOGGER.error(invocation.getMarker(), "Failed to send request, local:{}, remote:{}.",
-          getLocalAddress(), ipPort.getSocketAddress(), e);
-      fail((ConnectionBase) clientRequest.connection(), e);
-    });
-    clientRequest.connectionHandler(connection -> {
-      LOGGER.debug("http connection connected, local:{}, remote:{}.",
-          connection.localAddress(), connection.remoteAddress());
-      connection.closeHandler(v ->
-          LOGGER.debug("http connection closed, local:{}, remote:{}.",
-              connection.localAddress(), connection.remoteAddress())
-      );
-      connection.exceptionHandler(e ->
-          LOGGER.info("http connection exception, local:{}, remote:{}.",
-              connection.localAddress(), connection.remoteAddress(), e)
-      );
+      invocation.getTraceIdLogger()
+          .error(LOGGER, "Failed to send request, alreadyFailed:{}, local:{}, remote:{}, message={}.",
+              alreadyFailed, getLocalAddress(), ipPort.getSocketAddress(),
+              ExceptionUtils.getExceptionMessageWithoutTrace(e));
+      throwableHandler.handle(e);
     });
 
     // 从业务线程转移到网络线程中去发送
@@ -132,8 +133,11 @@ public class RestClientInvocation {
       try {
         restClientRequest.end();
       } catch (Throwable e) {
-        LOGGER.error(invocation.getMarker(),
-            "send http request failed, local:{}, remote: {}.", getLocalAddress(), ipPort, e);
+        invocation.getTraceIdLogger().error(LOGGER,
+            "send http request failed, alreadyFailed:{}, local:{}, remote: {}, message={}.",
+            alreadyFailed,
+            getLocalAddress(), ipPort
+            , ExceptionUtils.getExceptionMessageWithoutTrace(e));
         fail((ConnectionBase) clientRequest.connection(), e);
       }
     });
@@ -183,19 +187,19 @@ public class RestClientInvocation {
         .setURI(path);
 
     HttpMethod method = getMethod();
-    LOGGER.debug(invocation.getMarker(), "Sending request by rest, method={}, qualifiedName={}, path={}, endpoint={}.",
-        method,
-        invocation.getMicroserviceQualifiedName(),
-        path,
-        invocation.getEndpoint().getEndpoint());
+    invocation.getTraceIdLogger()
+        .debug(LOGGER, "Sending request by rest, method={}, qualifiedName={}, path={}, endpoint={}.",
+            method,
+            invocation.getMicroserviceQualifiedName(),
+            path,
+            invocation.getEndpoint().getEndpoint());
     clientRequest = httpClientWithContext.getHttpClient().request(method, requestOptions, this::handleResponse);
   }
 
   protected void handleResponse(HttpClientResponse httpClientResponse) {
     this.clientResponse = httpClientResponse;
 
-    if (HttpStatus.isSuccess(clientResponse.statusCode())
-        && Part.class.equals(invocation.getOperationMeta().getMethod().getReturnType())) {
+    if (HttpStatus.isSuccess(clientResponse.statusCode()) && restOperationMeta.isDownloadFile()) {
       ReadStreamPart part = new ReadStreamPart(httpClientWithContext.context(), httpClientResponse);
       invocation.getHandlerContext().put(RestConst.READ_STREAM_PART, part);
       processResponseBody(null);
@@ -203,8 +207,9 @@ public class RestClientInvocation {
     }
 
     httpClientResponse.exceptionHandler(e -> {
-      LOGGER.error(invocation.getMarker(), "Failed to receive response, local:{}, remote:{}.",
-          getLocalAddress(), httpClientResponse.netSocket().remoteAddress(), e);
+      invocation.getTraceIdLogger().error(LOGGER, "Failed to receive response, local:{}, remote:{}, message={}.",
+          getLocalAddress(), httpClientResponse.netSocket().remoteAddress(),
+          ExceptionUtils.getExceptionMessageWithoutTrace(e));
       fail((ConnectionBase) clientRequest.connection(), e);
     });
 
@@ -251,9 +256,11 @@ public class RestClientInvocation {
   }
 
   protected void fail(ConnectionBase connection, Throwable e) {
-    if (invocation.isFinished()) {
+    if (alreadyFailed) {
       return;
     }
+
+    alreadyFailed = true;
 
     InvocationStageTrace stageTrace = invocation.getInvocationStageTrace();
     // connection maybe null when exception happens such as ssl handshake failure
@@ -275,9 +282,19 @@ public class RestClientInvocation {
     stageTrace.finishClientFiltersResponse();
 
     try {
+      if (e instanceof TimeoutException) {
+        // give an accurate cause for timeout exception
+        //   The timeout period of 30000ms has been exceeded while executing GET /xxx for server 1.1.1.1:8080
+        // should not copy the message to invocationException to avoid leak server ip address
+        LOGGER.info("Request timeout, Details: {}.", e.getMessage());
+        asyncResp.consumerFail(new InvocationException(Status.REQUEST_TIMEOUT,
+            new CommonExceptionData("Request Timeout.")));
+        return;
+      }
       asyncResp.fail(invocation.getInvocationType(), e);
     } catch (Throwable e1) {
-      LOGGER.error(invocation.getMarker(), "failed to invoke asyncResp.fail.", e1);
+      invocation.getTraceIdLogger().error(LOGGER, "failed to invoke asyncResp, message={}"
+          , ExceptionUtils.getExceptionMessageWithoutTrace(e));
     }
   }
 
@@ -286,17 +303,18 @@ public class RestClientInvocation {
       String cseContext = JsonUtils.writeValueAsString(invocation.getContext());
       clientRequest.putHeader(org.apache.servicecomb.core.Const.CSE_CONTEXT, cseContext);
     } catch (Throwable e) {
-      LOGGER.debug(invocation.getMarker(), "Failed to encode and set cseContext.", e);
+      invocation.getTraceIdLogger().error(LOGGER, "Failed to encode and set cseContext, message={}."
+          , ExceptionUtils.getExceptionMessageWithoutTrace(e));
     }
   }
 
   protected String createRequestPath(RestOperationMeta swaggerRestOperation) throws Exception {
     URIEndpointObject address = (URIEndpointObject) invocation.getEndpoint().getAddress();
-    String urlPrefix = address.getFirst(Const.URL_PREFIX);
+    String urlPrefix = address.getFirst(DefinitionConst.URL_PREFIX);
 
     String path = (String) invocation.getHandlerContext().get(RestConst.REST_CLIENT_REQUEST_PATH);
     if (path == null) {
-      path = swaggerRestOperation.getPathBuilder().createRequestPath(invocation.getArgs());
+      path = swaggerRestOperation.getPathBuilder().createRequestPath(invocation.getSwaggerArguments());
     }
 
     if (StringUtils.isEmpty(urlPrefix) || path.startsWith(urlPrefix)) {

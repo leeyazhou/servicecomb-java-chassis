@@ -21,12 +21,13 @@ import java.util.List;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import javax.xml.ws.Holder;
 
 import org.apache.servicecomb.common.rest.filter.HttpServerFilter;
-import org.apache.servicecomb.core.CseContext;
+import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
 import org.apache.servicecomb.core.transport.TransportManager;
+import org.apache.servicecomb.foundation.common.Holder;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletRequestEx;
 import org.apache.servicecomb.foundation.vertx.http.HttpServletResponseEx;
 import org.junit.After;
@@ -52,12 +53,12 @@ public class TestServletRestDispatcher {
 
   @Before
   public void setup() {
-    CseContext.getInstance().setTransportManager(transportManager);
+    SCBBootstrap.createSCBEngineForTest().setTransportManager(transportManager);
   }
 
   @After
   public void teardown() {
-    CseContext.getInstance().setTransportManager(null);
+    SCBEngine.getInstance().destroy();
   }
 
   @Test

@@ -17,19 +17,13 @@
 
 package org.apache.servicecomb.core.bootup;
 
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
+import org.apache.servicecomb.registry.RegistrationManager;
 
 public class ServiceInformationCollector implements BootUpInformationCollector {
 
-
   @Override
   public String collect() {
-    return "App ID: " + RegistryUtils.getMicroservice().getAppId()
-        + "\n" + "Service Name: " + RegistryUtils.getMicroservice().getServiceName()
-        + "\n" + "Version: " + RegistryUtils.getMicroservice().getVersion()
-        + "\n" + "Environment: " + RegistryUtils.getMicroservice().getEnvironment()
-        + "\n" + "Service ID: " + RegistryUtils.getMicroserviceInstance().getServiceId()
-        + "\n" + "Instance ID: " + RegistryUtils.getMicroserviceInstance().getInstanceId();
+    return RegistrationManager.INSTANCE.info();
   }
 
   @Override

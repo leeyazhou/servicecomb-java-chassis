@@ -167,6 +167,10 @@ public final class ITJUnitUtils {
     runWithTransports(Arrays.asList(Const.RESTFUL), classes);
   }
 
+  public static void runWithHighway(Class<?>... classes) throws Throwable {
+    runWithTransports(Arrays.asList(Const.HIGHWAY), classes);
+  }
+
   public static void runWithTransports(List<String> transports, Class<?>... classes) throws Throwable {
     for (String transport : transports) {
       ITJUnitUtils.pushTransport(transport);
@@ -210,5 +214,9 @@ public final class ITJUnitUtils {
     } catch (Throwable e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  public static boolean isRestTransport() {
+    return Const.RESTFUL.equals(transport);
   }
 }

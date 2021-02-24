@@ -17,7 +17,6 @@
 package org.apache.servicecomb.inspector.internal;
 
 import static org.apache.servicecomb.core.Const.RESTFUL;
-import static org.apache.servicecomb.serviceregistry.api.Const.URL_PREFIX;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -41,15 +41,19 @@ import org.apache.servicecomb.config.priority.PriorityProperty;
 import org.apache.servicecomb.config.priority.PriorityPropertyManager;
 import org.apache.servicecomb.core.SCBEngine;
 import org.apache.servicecomb.core.Transport;
-import org.apache.servicecomb.core.transport.TransportManager;
+import org.apache.servicecomb.core.bootstrap.SCBBootstrap;
+import org.apache.servicecomb.core.definition.CoreMetaUtils;
+import org.apache.servicecomb.foundation.common.utils.ClassLoaderScopeContext;
 import org.apache.servicecomb.foundation.test.scaffolding.config.ArchaiusUtils;
 import org.apache.servicecomb.foundation.test.scaffolding.exception.RuntimeExceptionWithoutStackTrace;
 import org.apache.servicecomb.foundation.test.scaffolding.log.LogCollector;
 import org.apache.servicecomb.inspector.internal.model.DynamicPropertyView;
 import org.apache.servicecomb.inspector.internal.model.PriorityPropertyView;
 import org.apache.servicecomb.inspector.internal.swagger.SchemaFormat;
-import org.apache.servicecomb.serviceregistry.RegistryUtils;
-import org.apache.servicecomb.serviceregistry.api.registry.Microservice;
+import org.apache.servicecomb.registry.RegistrationManager;
+import org.apache.servicecomb.registry.api.registry.Microservice;
+import org.apache.servicecomb.registry.definition.DefinitionConst;
+import org.apache.servicecomb.swagger.engine.SwaggerProducer;
 import org.apache.servicecomb.swagger.invocation.Response;
 import org.apache.servicecomb.swagger.invocation.exception.CommonExceptionData;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
@@ -73,7 +77,7 @@ public class TestInspectorImpl {
 
   @BeforeClass
   public static void setup() throws IOException {
-    ArchaiusUtils.resetConfig();
+    ConfigUtil.installDynamicConfig();
     schemas.put("schema1", IOUtils
         .toString(TestInspectorImpl.class.getClassLoader().getResource("schema1.yaml"), StandardCharsets.UTF_8));
     schemas.put("schema2", IOUtils
@@ -83,23 +87,27 @@ public class TestInspectorImpl {
   }
 
   private static InspectorImpl initInspector(String urlPrefix) {
-    SCBEngine scbEngine = new SCBEngine();
-    scbEngine.setTransportManager(new TransportManager());
+    SCBEngine scbEngine = SCBBootstrap.createSCBEngineForTest();
+    scbEngine.getTransportManager().clearTransportBeforeInit();
 
     if (StringUtils.isNotEmpty(urlPrefix)) {
       Map<String, Transport> transportMap = Deencapsulation.getField(scbEngine.getTransportManager(), "transportMap");
       transportMap.put(RESTFUL, new ServletRestTransport());
-      System.setProperty(URL_PREFIX, urlPrefix);
+      ClassLoaderScopeContext.setClassLoaderScopeProperty(DefinitionConst.URL_PREFIX, urlPrefix);
     }
 
-    InspectorConfig inspectorConfig = scbEngine.getPriorityPropertyManager().createConfigObject(InspectorConfig.class);
-    return new InspectorImpl(scbEngine, inspectorConfig, new LinkedHashMap<>(schemas));
+    scbEngine.run();
+    SwaggerProducer producer = CoreMetaUtils
+        .getSwaggerProducer(scbEngine.getProducerMicroserviceMeta().findSchemaMeta("inspector"));
+    InspectorImpl inspector = (InspectorImpl) producer.getProducerInstance();
+    return new InspectorImpl(scbEngine, inspector.getInspectorConfig(), new LinkedHashMap<>(schemas));
   }
 
   @AfterClass
   public static void teardown() {
-    inspector.getScbEngine().getPriorityPropertyManager().unregisterConfigObject(inspector.getInspectorConfig());
     ArchaiusUtils.resetConfig();
+    SCBEngine.getInstance().destroy();
+    ClassLoaderScopeContext.clearClassLoaderScopeProperty();
   }
 
   private Map<String, String> unzip(InputStream is) throws IOException {
@@ -132,9 +140,9 @@ public class TestInspectorImpl {
   }
 
   private void testDownloadSchemasSwagger(Microservice microservice, SchemaFormat format) throws IOException {
-    new Expectations(RegistryUtils.class) {
+    new Expectations(RegistrationManager.INSTANCE) {
       {
-        RegistryUtils.getMicroservice();
+        RegistrationManager.INSTANCE.getMicroservice();
         result = microservice;
         microservice.getServiceName();
         result = "ms";
@@ -156,15 +164,14 @@ public class TestInspectorImpl {
 
   @Test
   public void downloadSchemas_html(@Mocked Microservice microservice) throws IOException {
-    new Expectations(RegistryUtils.class) {
+    new Expectations(RegistrationManager.INSTANCE) {
       {
-        RegistryUtils.getMicroservice();
+        RegistrationManager.INSTANCE.getMicroservice();
         result = microservice;
         microservice.getServiceName();
         result = "ms";
       }
     };
-
     Response response = inspector.downloadSchemas(SchemaFormat.HTML);
     Part part = response.getResult();
     Assert.assertEquals("ms.html.zip", part.getSubmittedFileName());
@@ -228,8 +235,8 @@ public class TestInspectorImpl {
 
     Part part = response.getResult();
     Assert.assertEquals(schemaId + ".yaml", part.getSubmittedFileName());
-    Assert.assertEquals("inline", response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION));
-    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
+    Assert.assertEquals("inline", response.getHeader(HttpHeaders.CONTENT_DISPOSITION));
+    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeader(HttpHeaders.CONTENT_TYPE));
 
     try (InputStream is = part.getInputStream()) {
       Assert.assertEquals(schemas.get(schemaId), IOUtils.toString(is, StandardCharsets.UTF_8));
@@ -249,8 +256,8 @@ public class TestInspectorImpl {
 
     Part part = response.getResult();
     Assert.assertEquals(schemaId + ".yaml", part.getSubmittedFileName());
-    Assert.assertNull(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION));
-    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
+    Assert.assertNull(response.getHeader(HttpHeaders.CONTENT_DISPOSITION));
+    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeader(HttpHeaders.CONTENT_TYPE));
 
     try (InputStream is = part.getInputStream()) {
       Assert.assertEquals(schemas.get(schemaId), IOUtils.toString(is, StandardCharsets.UTF_8));
@@ -268,8 +275,8 @@ public class TestInspectorImpl {
 
     Part part = response.getResult();
     Assert.assertEquals(schemaId + ".html", part.getSubmittedFileName());
-    Assert.assertEquals("inline", response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION));
-    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
+    Assert.assertEquals("inline", response.getHeader(HttpHeaders.CONTENT_DISPOSITION));
+    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeader(HttpHeaders.CONTENT_TYPE));
 
     try (InputStream is = part.getInputStream()) {
       Assert.assertTrue(IOUtils.toString(is, StandardCharsets.UTF_8).endsWith("</html>"));
@@ -287,8 +294,8 @@ public class TestInspectorImpl {
 
     Part part = response.getResult();
     Assert.assertEquals(schemaId + ".html", part.getSubmittedFileName());
-    Assert.assertNull(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION));
-    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
+    Assert.assertNull(response.getHeader(HttpHeaders.CONTENT_DISPOSITION));
+    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeader(HttpHeaders.CONTENT_TYPE));
 
     try (InputStream is = part.getInputStream()) {
       Assert.assertTrue(IOUtils.toString(is, StandardCharsets.UTF_8).endsWith("</html>"));
@@ -312,8 +319,8 @@ public class TestInspectorImpl {
     Response response = inspector.getStaticResource("index.html");
 
     Part part = response.getResult();
-    Assert.assertEquals("inline", response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION));
-    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
+    Assert.assertEquals("inline", response.getHeader(HttpHeaders.CONTENT_DISPOSITION));
+    Assert.assertEquals(MediaType.TEXT_HTML, response.getHeader(HttpHeaders.CONTENT_TYPE));
 
     try (InputStream is = part.getInputStream()) {
       Assert.assertTrue(IOUtils.toString(is, StandardCharsets.UTF_8).endsWith("</html>"));
@@ -328,15 +335,17 @@ public class TestInspectorImpl {
     });
 
     List<DynamicPropertyView> views = inspector.dynamicProperties();
-    Assert.assertThat(views.stream().map(DynamicPropertyView::getCallbackCount).collect(Collectors.toList()),
-        Matchers.contains(1, 0, 0, 0));
-    Assert.assertThat(views.stream().map(DynamicPropertyView::getKey).collect(Collectors.toList()),
-        Matchers.contains("yyy", "zzz", "servicecomb.inspector.enabled",
-            "servicecomb.inspector.swagger.html.asciidoctorCss"));
+    Map<String, DynamicPropertyView> viewMap = views.stream()
+        .collect(Collectors.toMap(DynamicPropertyView::getKey, Function.identity()));
+    Assert.assertEquals(1, viewMap.get("yyy").getCallbackCount());
+    Assert.assertEquals(0, viewMap.get("zzz").getCallbackCount());
+    Assert.assertEquals(0, viewMap.get("servicecomb.inspector.enabled").getCallbackCount());
+    Assert.assertEquals(0, viewMap.get("servicecomb.inspector.swagger.html.asciidoctorCss").getCallbackCount());
 
+    int count = ConfigUtil.getAllDynamicProperties().size();
     ConfigUtil.getAllDynamicProperties().remove("yyy");
     ConfigUtil.getAllDynamicProperties().remove("zzz");
-    Assert.assertEquals(2, ConfigUtil.getAllDynamicProperties().size());
+    Assert.assertEquals(count - 2, ConfigUtil.getAllDynamicProperties().size());
   }
 
   @Test
@@ -353,10 +362,6 @@ public class TestInspectorImpl {
         views.get(0).getDynamicProperties().stream().map(DynamicPropertyView::getKey).collect(Collectors.toList()),
         Matchers.contains("high", "low"));
 
-    priorityPropertyManager.unregisterPriorityProperty(priorityProperty);
-    views = inspector.priorityProperties();
-    Assert.assertTrue(views.isEmpty());
-
     priorityPropertyManager.close();
     inspector.setPriorityPropertyManager(null);
   }
@@ -367,8 +372,5 @@ public class TestInspectorImpl {
 
     Map<String, String> schemas = Deencapsulation.getField(inspector, "schemas");
     Assert.assertTrue(schemas.get("schema1").indexOf("/webroot/rest/metrics") > 0);
-
-    inspector.getScbEngine().getPriorityPropertyManager().unregisterConfigObject(inspector.getInspectorConfig());
-    System.clearProperty(URL_PREFIX);
   }
 }

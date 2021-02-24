@@ -18,6 +18,7 @@
 package org.apache.servicecomb.foundation.protobuf.internal.schema.deserializer;
 
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +62,19 @@ public class MessageReadSchema<T> implements SchemaEx<T> {
 
   private JavaType javaType;
 
+  Map<String, Type> argumentsTypes;
+
+  private boolean argumentsRoot = false;
+
+  @SuppressWarnings("unchecked")
+  public MessageReadSchema(ProtoMapper protoMapper, Message message, Map<String, Type> argumentsTypes) {
+    this.argumentsRoot = true;
+    this.protoMapper = protoMapper;
+    this.message = message;
+    this.argumentsTypes = argumentsTypes;
+    this.instantiator = RuntimeEnv.newInstantiator((Class<T>) ProtoConst.MAP_TYPE.getRawClass());
+  }
+
   @SuppressWarnings("unchecked")
   public MessageReadSchema(ProtoMapper protoMapper, Message message, JavaType javaType) {
     this.protoMapper = protoMapper;
@@ -93,6 +107,12 @@ public class MessageReadSchema<T> implements SchemaEx<T> {
   @SuppressWarnings("unchecked")
   @Override
   public void init() {
+    if (argumentsRoot) {
+      this.fieldMap = (FieldMapEx<T>) protoMapper.getDeserializerSchemaManager()
+          .createMapFields(message, argumentsTypes);
+      return;
+    }
+
     if (Map.class.isAssignableFrom(javaType.getRawClass())) {
       this.fieldMap = (FieldMapEx<T>) protoMapper.getDeserializerSchemaManager()
           .createMapFields(message);
@@ -144,12 +164,14 @@ public class MessageReadSchema<T> implements SchemaEx<T> {
         n = input.readFieldNumber();
       }
     } catch (Throwable e) {
-      Field protoField = fieldSchema.getProtoField();
-      LOGGER.error("Failed to mergeFrom, field={}:{}, type={}",
-          protoField.getType().getCanonicalName(),
-          protoField.getName(),
-          protoField.getTypeName(),
-          e.getMessage());
+      if (fieldSchema != null) {
+        Field protoField = fieldSchema.getProtoField();
+        LOGGER.error("Failed to mergeFrom, field={}:{}, type={}",
+            protoField.getType().getCanonicalName(),
+            protoField.getName(),
+            protoField.getTypeName(),
+            e.getMessage());
+      }
       throw e;
     }
   }

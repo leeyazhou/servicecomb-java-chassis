@@ -18,9 +18,10 @@
 package org.apache.servicecomb.service.center.client;
 
 import java.io.IOException;
+import java.util.Arrays;
 
-import org.apache.servicecomb.service.center.client.http.HttpResponse;
-import org.apache.servicecomb.service.center.client.http.HttpTransport;
+import org.apache.servicecomb.http.client.common.HttpResponse;
+import org.apache.servicecomb.http.client.common.HttpTransport;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -43,11 +44,10 @@ public class ServiceCenterRawClientTest {
 
     HttpTransport httpTransport = Mockito.mock(HttpTransport.class);
 
+    AddressManager addressManager = new AddressManager(PROJECT_NAME, Arrays.asList("http://127.0.0.1:30100"));
     ServiceCenterRawClient client = new ServiceCenterRawClient.Builder()
         .setHttpTransport(httpTransport)
-        .setHost(DEFAULT_HOST)
-        .setPort(DEFAULT_PORT)
-        .setProjectName(PROJECT_NAME)
+        .setAddressManager(addressManager)
         .setTenantName(TENANT_NAME)
         .build();
 

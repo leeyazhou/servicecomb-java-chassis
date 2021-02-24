@@ -21,7 +21,7 @@ import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.util.concurrent.Callable;
 
-import org.apache.servicecomb.common.rest.codec.RestObjectMapper;
+import org.apache.servicecomb.foundation.common.utils.RestObjectMapper;
 import org.apache.servicecomb.foundation.test.scaffolding.model.Color;
 import org.junit.Assert;
 import org.junit.Test;
@@ -130,11 +130,11 @@ public class TestDoSFix {
 
   @Test
   public void testChar() {
-    batFastFail(char.class, InputCoercionException.class, MismatchedInputException.class);
-    batFastFail(Character.class, InputCoercionException.class, MismatchedInputException.class);
+    batFastFail(char.class, InputCoercionException.class, InvalidFormatException.class);
+    batFastFail(Character.class, InputCoercionException.class, InvalidFormatException.class);
 
-    batFastFail("cValue", JsonMappingException.class, MismatchedInputException.class);
-    batFastFail("cObjValue", JsonMappingException.class, MismatchedInputException.class);
+    batFastFail("cValue", JsonMappingException.class, InvalidFormatException.class);
+    batFastFail("cObjValue", JsonMappingException.class, InvalidFormatException.class);
   }
 
   @Test

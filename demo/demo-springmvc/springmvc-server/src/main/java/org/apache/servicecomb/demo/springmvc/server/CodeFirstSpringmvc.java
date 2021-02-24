@@ -25,15 +25,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.Part;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Response.Status;
-import javax.xml.ws.Holder;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.servicecomb.common.rest.codec.RestObjectMapperFactory;
+import org.apache.servicecomb.core.BootListener;
 import org.apache.servicecomb.core.Const;
 import org.apache.servicecomb.demo.EmptyObject;
 import org.apache.servicecomb.demo.Generic;
@@ -46,6 +45,8 @@ import org.apache.servicecomb.demo.ignore.OutputModelForTestIgnore;
 import org.apache.servicecomb.demo.jaxbbean.JAXBPerson;
 import org.apache.servicecomb.demo.server.User;
 import org.apache.servicecomb.demo.springmvc.decoderesponse.DecodeTestResponse;
+import org.apache.servicecomb.foundation.common.Holder;
+import org.apache.servicecomb.foundation.common.utils.SPIServiceUtils;
 import org.apache.servicecomb.metrics.core.MetricsBootListener;
 import org.apache.servicecomb.provider.rest.common.RestSchema;
 import org.apache.servicecomb.swagger.extend.annotations.RawJsonRequestBody;
@@ -55,7 +56,6 @@ import org.apache.servicecomb.swagger.invocation.context.ContextUtils;
 import org.apache.servicecomb.swagger.invocation.context.InvocationContext;
 import org.apache.servicecomb.swagger.invocation.exception.CommonExceptionData;
 import org.apache.servicecomb.swagger.invocation.exception.InvocationException;
-import org.apache.servicecomb.swagger.invocation.response.Headers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -153,17 +153,34 @@ public class CodeFirstSpringmvc {
     return responseEntity(c1, date);
   }
 
+  // This definition is not correct, response type is not
+  // same as the actual one. May be not support in future.
   @ApiResponse(code = 200, response = User.class, message = "")
   @ResponseHeaders({@ResponseHeader(name = "h1", response = String.class),
       @ResponseHeader(name = "h2", response = String.class)})
   @RequestMapping(path = "/cseResponse", method = RequestMethod.GET)
   public Response cseResponse(InvocationContext c1) {
     Response response = Response.createSuccess(Status.ACCEPTED, new User());
-    Headers headers = response.getHeaders();
-    headers.addHeader("h1", "h1v " + c1.getContext().get(Const.SRC_MICROSERVICE));
+    response.addHeader("h1", "h1v " + c1.getContext().get(Const.SRC_MICROSERVICE));
 
     InvocationContext c2 = ContextUtils.getInvocationContext();
-    headers.addHeader("h2", "h2v " + c2.getContext().get(Const.SRC_MICROSERVICE));
+    response.addHeader("h2", "h2v " + c2.getContext().get(Const.SRC_MICROSERVICE));
+
+    return response;
+  }
+
+  // This definition is correct, but not supported by highway.
+  // highway do not support define code other than 200
+  @ApiResponse(code = 202, response = User.class, message = "")
+  @ResponseHeaders({@ResponseHeader(name = "h1", response = String.class),
+      @ResponseHeader(name = "h2", response = String.class)})
+  @RequestMapping(path = "/cseResponseCorrect", method = RequestMethod.GET)
+  public Response cseResponseCorrect(InvocationContext c1) {
+    Response response = Response.createSuccess(Status.ACCEPTED, new User());
+    response.addHeader("h1", "h1v " + c1.getContext().get(Const.SRC_MICROSERVICE));
+
+    InvocationContext c2 = ContextUtils.getInvocationContext();
+    response.addHeader("h2", "h2v " + c2.getContext().get(Const.SRC_MICROSERVICE));
 
     return response;
   }
@@ -315,7 +332,7 @@ public class CodeFirstSpringmvc {
     return name;
   }
 
-  enum NameType {
+  public enum NameType {
     abc,
     def
   }
@@ -364,8 +381,8 @@ public class CodeFirstSpringmvc {
     return form1 + form2;
   }
 
-  @Inject
-  MetricsBootListener metricsBootListener;
+  MetricsBootListener metricsBootListener = SPIServiceUtils
+      .getTargetService(BootListener.class, MetricsBootListener.class);
 
   //Only for Prometheus integration test
   @RequestMapping(path = "/prometheusForTest", method = RequestMethod.GET)
@@ -497,10 +514,10 @@ public class CodeFirstSpringmvc {
    */
   @PostMapping(path = "/checkQueryObject")
   public String checkQueryObject(Person person, @RequestParam(name = "otherName") String otherName,
-      InvocationContext invocationContext, @RequestParam(name = "name") String name, @RequestBody Person requestBody) {
+      InvocationContext invocationContext, @RequestBody Person requestBody) {
     LOGGER.info("checkQueryObject() is called!");
     return "invocationContext_is_null=" + (null == invocationContext) + ",person="
-        + person + ",otherName=" + otherName + ",name=" + name + ",requestBody=" + requestBody;
+        + person + ",otherName=" + otherName + ",name=" + person.getName() + ",requestBody=" + requestBody;
   }
 
   /**
@@ -509,9 +526,9 @@ public class CodeFirstSpringmvc {
    */
   @PutMapping(path = "/checkQueryGenericObject")
   public String checkQueryGenericObject(@RequestBody GenericParam<Person> requestBody,
-      GenericParamWithJsonIgnore<Person> generic, String str) {
+      GenericParamWithJsonIgnore<Person> generic) {
     LOGGER.info("checkQueryGenericObject() is called!");
-    return "str=" + str + ",generic=" + generic + ",requestBody=" + requestBody;
+    return "str=" + generic.getStr() + ",generic=" + generic + ",requestBody=" + requestBody;
   }
 
   /**
@@ -519,10 +536,10 @@ public class CodeFirstSpringmvc {
    * The same for those simple type field inherited from the parent class.
    */
   @PutMapping(path = "/checkQueryGenericString")
-  public String checkQueryGenericString(String str, @RequestBody GenericParam<Person> requestBody,
+  public String checkQueryGenericString(@RequestBody GenericParam<Person> requestBody,
       GenericParamExtended<String> generic) {
     LOGGER.info("checkQueryGenericObject() is called!");
-    return "str=" + str + ",generic=" + generic + ",requestBody=" + requestBody;
+    return "str=" + generic.getStr() + ",generic=" + generic + ",requestBody=" + requestBody;
   }
 
   @GetMapping(path = "/testDelay")

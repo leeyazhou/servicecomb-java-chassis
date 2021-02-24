@@ -18,6 +18,7 @@ package org.apache.servicecomb.core.executor;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -51,8 +52,8 @@ public class TestThreadPoolExecutorEx {
     }
   }
 
-  ThreadPoolExecutorEx executorEx = new ThreadPoolExecutorEx(2, 4, 60, TimeUnit.SECONDS,
-      new LinkedBlockingQueueEx<>(2));
+  ThreadPoolExecutorEx executorEx = new ThreadPoolExecutorEx(2, 4, 2, TimeUnit.SECONDS,
+      new LinkedBlockingQueueEx(2), Executors.defaultThreadFactory());
 
   public TestTask submitTask() {
     TestTask task = new TestTask();
@@ -138,11 +139,18 @@ public class TestThreadPoolExecutorEx {
     t4.quit();
     t5.quit();
     t6.quit();
+    waitForResult(2, executorEx::getPoolSize);
     executorEx.shutdown();
   }
 
   private void waitForResult(int expect, IntSupplier supplier) {
+    long max = 30000;
+    long waited = 0;
+
     for (; ; ) {
+      if (waited > max) {
+        throw new IllegalStateException("timed out waiting.");
+      }
       int actual = supplier.getAsInt();
       if (expect == actual) {
         return;
@@ -150,7 +158,8 @@ public class TestThreadPoolExecutorEx {
 
       LOGGER.info("waiting for thread result, expect:{}, actual: {}.", expect, actual);
       try {
-        TimeUnit.MILLISECONDS.sleep(100);
+        TimeUnit.MILLISECONDS.sleep(200);
+        waited += 200;
       } catch (InterruptedException e) {
         throw new IllegalStateException(e);
       }
